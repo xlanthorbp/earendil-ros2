@@ -19,11 +19,9 @@ setup(
         (os.path.join('share', package_name, 'config'), [
             'config/twist_mux.yaml',
             'config/nav2_params.yaml',
-            'config/mapper_params_online_async.yaml',
             'config/ukf_local.yaml',
             'config/ukf_global.yaml',
             'config/navsat.yaml',
-            'config/missions.yaml',
             'config/controllers.yaml',
         ]),
 
@@ -41,18 +39,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'tank_teleop = earendil_bot.tank_teleop:main',
             'arduino_joy = earendil_bot.arduino_joy:main',
             'joy_teleop = earendil_bot.joy_teleop:main',
-            'waypoint_nav = earendil_bot.waypoint_nav:main',
-            'circle_drive = earendil_bot.circle_drive:main',
-            'tunnel_aruco_nav = earendil_bot.tunnel_aruco_nav:main',
-            'base_exit = earendil_bot.base_exit:main',
-            'mission_nav = earendil_bot.mission_nav:main',
-            'base_return = earendil_bot.base_return:main',
-            'mission_start = earendil_bot.mission_start:main',
-            'scan_ground_filter = earendil_bot.scan_ground_filter:main',
-            'pointcloud_ground_filter = earendil_bot.pointcloud_ground_filter:main',
+            'simple_motor_bridge = earendil_bot.simple_motor_bridge:main',
+            'pure_gps_nav = earendil_bot.pure_gps_nav:main',
         ],
     },
 )
