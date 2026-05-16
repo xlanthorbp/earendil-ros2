@@ -1,0 +1,7 @@
+<library path="earendil_hardware">
+  <class name="earendil_hardware/EarendilSystemHardware" type="earendil_hardware::EarendilSystemHardware" base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Serial communication hardware interface for Earendil Bot Arduino Mega motor controller.
+    </description>
+  </class>
+</library>

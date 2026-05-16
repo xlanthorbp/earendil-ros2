@@ -1,0 +1,71 @@
+# ROS 2 Workspace
+build/
+install/
+log/
+*.log
+
+# MATLAB/Simulink
+*.asv
+*.slxc
+slprj/
+*.mex*
+
+# IDE / OS
+.vscode/
+.codex
+.idea/
+*.swp
+*~
+.DS_Store
+.github/
+
+# ROS 2 build folders (these should not be in the package itself, but just in case)
+build/
+install/
+log/
+
+# Python generated files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+env.bak/
+venv.bak/
+
+# Environment configurations
+.env
+.env.local
+
+# IDE and Editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.directory
+
+# Gazebo / Simulation caches
+~/.gazebo/models/
+~/.ignition/
+
+# ROS 2 bags
+*.db3
+*.yaml.bag
+
+# Logs and databases
+*.sqlite3
+*.log
+
+# Temp files
+tmp/
+
+.git
+.gitignore
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md

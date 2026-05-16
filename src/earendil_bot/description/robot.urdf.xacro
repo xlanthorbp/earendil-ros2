@@ -1,0 +1,287 @@
+<?xml version="1.0"?>
+<robot name="my_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+<!-- Body Dimensions -->
+<xacro:property name="body_link_x_dim" value="1.0"/>
+<xacro:property name="body_link_y_dim" value="0.6"/>
+<xacro:property name="body_link_z_dim" value="0.3"/>
+
+<!-- Wheel Dimensions & Locations -->
+<xacro:property name="wheel_link_radius" value="0.15"/>
+<xacro:property name="wheel_link_length" value="0.1"/>
+<xacro:property name="wheel_link_z_location" value="-0.1"/>
+
+<!-- Caster sphere dimensions and locations -->
+<xacro:property name="caster_link_radius" value="0.15"/>
+<xacro:property name="caster_link_z_location" value="0.1"/>
+
+<!-- Material Density -->
+<xacro:property name="body_density" value ="2710.0"/>
+<xacro:property name="wheel_density" value ="2710.0"/>
+<xacro:property name="caster_density" value ="2710.0"/>	
+
+<!-- pi constant -->
+<xacro:property name="pi" value="3.14159265358979323846264338327950288419716"/>
+
+<!-- body, wheel, caster mass -->
+<xacro:property name="body_mass" value="${body_density*body_link_x_dim*body_link_y_dim*body_link_z_dim}" />
+<xacro:property name="wheel_mass" value ="${wheel_density*pi*wheel_link_radius*wheel_link_radius*wheel_link_length}" />
+<xacro:property name="caster_mass" value="${caster_density*(4.0/3.0)*pi*caster_link_radius*caster_link_radius*caster_link_radius}" />
+
+<!-- Moments of inertia of the wheel -->
+<xacro:property name="iz_wheel" value="${0.5*wheel_mass*wheel_link_radius*wheel_link_radius}" />
+<xacro:property name="i_wheel" value="${(1.0/2.0)*wheel_mass*(3.0*wheel_link_radius*wheel_link_radius+wheel_link_length*wheel_link_length)}" />
+
+<!-- Moments of inertia of the caster sphere -->
+<xacro:property name="i_caster" value="${(2.0/5.0)*caster_mass*caster_link_radius*caster_link_radius}" />
+
+<!-- Defining macro of the complete inertial section of the wheel -->
+<xacro:macro name="inertia_wheel">
+	<inertial>
+		<origin rpy="0 0 0" xyz="0 0 0"/>
+		<mass value="${wheel_mass}"/>
+		<inertia ixx="${i_wheel}" ixy="0.0" ixz="0.0" iyy="${i_wheel}" iyz="0.0" izz="${iz_wheel}" />
+	</inertial>
+</xacro:macro>
+
+<!-- Defining macro of the complete inertial section of the caster -->
+<xacro:macro name="inertia_caster">
+	<inertial>
+		<origin rpy="0 0 0" xyz="0 0 0"/>
+		<mass value="${caster_mass}"/>
+		<inertia ixx="${i_caster}" ixy="0.0" ixz="0.0" iyy="${i_caster}" iyz="0.0" izz="${i_caster}" />
+	</inertial>
+</xacro:macro>
+
+<!-- Gazebo plugins removed — real robot uses hardware drivers instead -->
+
+
+<!-- START links and joints:  -->
+<!-- ################################################################################ -->
+<!-- Body link of the robot -->
+
+<link name="body_link">
+	<visual>
+		<geometry>
+			<box size ="${body_link_x_dim} ${body_link_y_dim} ${body_link_z_dim}" />
+		</geometry>
+	<origin rpy="0 0 0" xyz="0 0 0"/>
+	</visual>
+	
+	<collision>
+		<geometry>
+			<box size="${body_link_x_dim} ${body_link_y_dim} ${body_link_z_dim}" />
+		</geometry>
+		<origin rpy="0 0 0" xyz="0 0 0"/>
+	</collision>
+	
+	<inertial>
+		<origin rpy="0 0 0" xyz="0 0 0"/>
+		<mass value="${body_mass}"/>
+	<inertia
+	ixx="${(1.0/12.0)*body_mass*(body_link_y_dim*body_link_y_dim+body_link_z_dim*body_link_z_dim)}" ixy="0.0" ixz="0.0" iyz="0.0" iyy="${(1.0/12.0)*body_mass*(body_link_x_dim*body_link_x_dim+body_link_z_dim*body_link_z_dim)}" izz="${(1.0/12.0)*body_mass*(body_link_y_dim*body_link_y_dim+body_link_x_dim*body_link_x_dim)}"
+	/>
+	</inertial>
+</link>
+
+
+<!-- End of body link -->
+<!-- ################################################################################ -->
+<!-- Starting base footprint link -->
+
+
+<joint name="base_footprint_joint" type = "fixed">
+	<parent link ="base_footprint"/>
+	<child link="body_link"/>
+	<origin xyz="0 0 0" rpy="0 0 0"/>
+</joint>
+
+<link name="base_footprint">
+</link>
+	
+<!-- End of base footprint link -->
+<!-- ################################################################################ -->
+<!-- Starting back right wheel of the robot and joint  wheel1=brwheel wheel2=blwheel -->
+
+<joint name="brwheel_joint" type="continuous" >
+	<parent link="body_link"/>
+	<child link="brwheel_link" />
+	<origin xyz="${-2*wheel_link_radius} ${-body_link_y_dim/2-wheel_link_length/2} ${wheel_link_z_location}" rpy="0 0 0" />
+	<axis xyz="0 1 0"/>
+	<limit effort="1000.0" velocity="1000.0"/>
+	<dynamics damping="0.0" friction="0.0"/>
+</joint>
+
+<link name="brwheel_link">
+	<visual>
+		<origin rpy="1.570795 0 0" xyz="0 0 0"/>
+		<geometry>
+			<cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
+		</geometry>
+	</visual>
+	
+	<collision>
+		<origin rpy="1.570795 0 0" xyz="0 0 0"/>
+		<geometry>
+			<cylinder length="${wheel_link_length}" radius="${wheel_link_radius}" />
+		</geometry>
+	</collision>
+	
+	<xacro:inertia_wheel />
+</link>
+
+<!-- End of back right wheel link and joint -->
+<!-- ################################################################################ -->
+<!-- Starting left wheel of the robot and joint -->
+
+<joint name="blwheel_joint" type="continuous" >
+	<parent link="body_link"/>
+	<child link="blwheel_link" />
+	<origin xyz="${-2*wheel_link_radius} ${body_link_y_dim/2+wheel_link_length/2} ${wheel_link_z_location}" rpy="0 0 0" />
+	<axis xyz="0 1 0"/>
+	<limit effort="1000.0" velocity="1000.0"/>
+	<dynamics damping="0.0" friction="0.0"/>
+</joint>
+
+<link name="blwheel_link">
+	<visual>
+		<origin rpy="1.570795 0 0" xyz="0 0 0"/>
+		<geometry>
+			<cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
+		</geometry>
+	</visual>
+	
+	<collision>
+		<origin rpy="1.570795 0 0" xyz="0 0 0"/>
+		<geometry>
+			<cylinder length="${wheel_link_length}" radius="${wheel_link_radius}" />
+		</geometry>
+	</collision>
+	
+	<xacro:inertia_wheel />
+</link>
+
+<!-- ################################################################################ -->
+
+<joint name="frwheel_joint" type="continuous" >
+    <parent link="body_link"/>
+    <child link="frwheel_link" />
+    <origin xyz="${2*wheel_link_radius} ${-body_link_y_dim/2-wheel_link_length/2} ${wheel_link_z_location}" rpy="0 0 0" />
+    <axis xyz="0 1 0"/>
+    <limit effort="1000.0" velocity="1000.0"/>
+    <dynamics damping="0.0" friction="0.0"/>
+</joint>
+
+<link name="frwheel_link">
+    <visual>
+        <origin rpy="1.570795 0 0" xyz="0 0 0"/>
+        <geometry>
+            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
+        </geometry>
+    </visual>
+    
+    <collision>
+        <origin rpy="1.570795 0 0" xyz="0 0 0"/>
+        <geometry>
+            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}" />
+        </geometry>
+    </collision>
+    
+    <xacro:inertia_wheel />
+</link>
+
+<!-- ################################################################################ -->
+
+<joint name="flwheel_joint" type="continuous" >
+    <parent link="body_link"/>
+    <child link="flwheel_link" />
+    <origin xyz="${2*wheel_link_radius} ${body_link_y_dim/2+wheel_link_length/2} ${wheel_link_z_location}" rpy="0 0 0" />
+    <axis xyz="0 1 0"/>
+    <limit effort="1000.0" velocity="1000.0"/>
+    <dynamics damping="0.0" friction="0.0"/>
+</joint>
+
+<link name="flwheel_link">
+    <visual>
+        <origin rpy="1.570795 0 0" xyz="0 0 0"/>
+        <geometry>
+            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}"/>
+        </geometry>
+    </visual>
+    
+    <collision>
+        <origin rpy="1.570795 0 0" xyz="0 0 0"/>
+        <geometry>
+            <cylinder length="${wheel_link_length}" radius="${wheel_link_radius}" />
+        </geometry>
+    </collision>
+    
+    <xacro:inertia_wheel />
+</link>
+
+<!-- End of back left wheel link and joint -->
+<!-- ################################################################################ -->
+<!-- Starting LIDAR -->
+
+<xacro:include filename="lidar.xacro" />
+
+<!-- ################################################################################ -->
+<!-- Starting Camera / IMU -->
+
+<xacro:include filename="camera.xacro" />
+
+<!-- IMU: Real ICM20948 driver publishes /imu/data directly, no URDF sensor needed -->
+
+<!-- ################################################################################ -->
+<!-- ros2_control configuration for Arduino Mega BTS7960 -->
+
+<ros2_control name="EarendilHardware" type="system">
+  <hardware>
+    <plugin>earendil_hardware/EarendilSystemHardware</plugin>
+    <param name="port">/dev/ttyACM0</param>
+    <param name="baud_rate">115200</param>
+    <param name="enc_ticks_per_rev">341</param> <!-- TODO: Set to your actual encoder ticks per revolution -->
+  </hardware>
+
+  <!-- Front Left Wheel -->
+  <joint name="flwheel_joint">
+    <command_interface name="velocity">
+      <param name="min">-10</param>
+      <param name="max">10</param>
+    </command_interface>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+
+  <!-- Back Left Wheel -->
+  <joint name="blwheel_joint">
+    <command_interface name="velocity">
+      <param name="min">-10</param>
+      <param name="max">10</param>
+    </command_interface>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+
+  <!-- Front Right Wheel -->
+  <joint name="frwheel_joint">
+    <command_interface name="velocity">
+      <param name="min">-10</param>
+      <param name="max">10</param>
+    </command_interface>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+
+  <!-- Back Right Wheel -->
+  <joint name="brwheel_joint">
+    <command_interface name="velocity">
+      <param name="min">-10</param>
+      <param name="max">10</param>
+    </command_interface>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+  </joint>
+</ros2_control>
+
+</robot>

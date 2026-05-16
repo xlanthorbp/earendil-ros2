@@ -1,0 +1,41 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50 # Hz
+    use_sim_time: false
+
+    diff_drive_controller:
+      type: diff_drive_controller/DiffDriveController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+diff_drive_controller:
+  ros__parameters:
+    use_sim_time: false
+    left_wheel_names: ["flwheel_joint", "blwheel_joint"]
+    right_wheel_names: ["frwheel_joint", "brwheel_joint"]
+
+    wheel_separation: 0.6 # meters (body_link_y_dim)
+    wheel_radius: 0.15    # meters
+
+    wheel_separation_multiplier: 1.0
+    left_wheel_radius_multiplier: 1.0
+    right_wheel_radius_multiplier: 1.0
+
+    publish_rate: 50.0 # Hz
+    odom_frame_id: odom
+    base_frame_id: base_footprint
+
+    # Twist Mux feeds /cmd_vel into here. We disable the controller's own twist limits 
+    # to let Nav2's velocity_smoother handle acceleration limits smoothly.
+    # Alternatively, you can define limits here if you prefer hardware-level limits.
+    linear.x.has_velocity_limits: true
+    linear.x.max_velocity: 1.0
+    linear.x.min_velocity: -1.0
+    linear.x.has_acceleration_limits: true
+    linear.x.max_acceleration: 0.8
+
+    angular.z.has_velocity_limits: true
+    angular.z.max_velocity: 2.0
+    angular.z.has_acceleration_limits: true
+    angular.z.max_acceleration: 1.5
