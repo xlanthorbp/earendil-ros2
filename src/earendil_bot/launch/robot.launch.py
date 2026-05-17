@@ -5,6 +5,7 @@ from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchA
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, Command
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     pkg_earendil = get_package_share_directory('earendil_bot')
@@ -27,7 +28,7 @@ def generate_launch_description():
         executable='robot_state_publisher',
         output='screen',
         parameters=[{
-            'robot_description': Command(['xacro ', xacro_file]),
+            'robot_description': ParameterValue(Command(['xacro ', xacro_file]), value_type=str),
             'use_sim_time': False
         }]
     )
@@ -72,16 +73,31 @@ def generate_launch_description():
     #     remappings=[('fix', '/gps/raw_fix')]
     # )
 
+    # ==========================================
+    # IMU (GY-91 / MPU9250 via I2C)
+    # ==========================================
+    gy91_imu_node = Node(
+        package='earendil_bot',
+        executable='gy91_imu_node',
+        output='screen',
+        parameters=[{
+            'i2c_bus': 1,
+            'publish_rate': 20.0,
+            'frame_id': 'imu_link'
+        }]
+    )
+
     return LaunchDescription([
         # Hardware & Core
         robot_state_publisher,
         twist_mux,
         simple_motor_bridge,
         
-        # Hardware Driver Nodes (UNCOMMENT WHEN PLUGGED IN)
-        # gps_node, # Uncomment this AND the definition above when you plug in GPS!
+        # Sensors
+        # gps_node,  # Uncomment when GPS is plugged in
+        gy91_imu_node,
 
-        # Pure GPS Navigation Script
-        # NOTE: Run `ros2 run earendil_bot pure_gps_nav` in a separate terminal 
-        # when you want the robot to start driving to the target!
+        # Navigation:
+        # Run in a separate terminal:
+        # ros2 run earendil_bot pure_gps_nav --ros-args -p target_lat:=... -p target_lon:=...
     ])

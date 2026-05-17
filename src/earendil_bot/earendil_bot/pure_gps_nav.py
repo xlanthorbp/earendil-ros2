@@ -1,109 +1,168 @@
 #!/usr/bin/env python3
+"""
+Pure GPS + IMU Navigation Node (Auto Base Discovery)
+------------------------------------------------------
+Listens for the base station GPS coordinates over UDP (broadcast),
+uses its own GPS for position and IMU for heading,
+then rotates the robot to face the base station.
+
+No manual target_lat / target_lon parameters needed!
+The base station runs 'base_gps_sender.py' on the laptop.
+"""
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import Twist
 import math
+import socket
+import threading
+
 
 class PureGpsNav(Node):
     def __init__(self):
         super().__init__('pure_gps_nav')
-        
-        # TARGET GPS COORDINATES (Change these!)
-        self.declare_parameter('target_lat', 39.925050)
-        self.declare_parameter('target_lon', 32.836956)
-        
-        self.target_lat = self.get_parameter('target_lat').value
-        self.target_lon = self.get_parameter('target_lon').value
-        
+
+        self.declare_parameter('heading_tolerance', 0.15)    # radians (~8.5 degrees)
+        self.declare_parameter('udp_port', 5555)             # Must match base_gps_sender.py
+
+        self.heading_tol = self.get_parameter('heading_tolerance').value
+        udp_port = self.get_parameter('udp_port').value
+
+        # State
         self.current_lat = None
         self.current_lon = None
-        
-        self.prev_lat = None
-        self.prev_lon = None
-        self.current_heading = 0.0 # Radians (0 is North)
-        
-        self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
-        self.sub = self.create_subscription(NavSatFix, '/gps/raw_fix', self.gps_cb, 10)
-        
-        self.timer = self.create_timer(0.5, self.control_loop) # 2 Hz loop
-        self.get_logger().info(f"Pure GPS Nav started. Target: {self.target_lat}, {self.target_lon}")
+        self.imu_heading = None
+        self.base_lat = None
+        self.base_lon = None
 
+        # Publishers & Subscribers
+        self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
+        self.create_subscription(NavSatFix, '/gps/raw_fix', self.gps_cb, 10)
+        self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
+
+        # Start UDP listener thread for base station coordinates
+        self._udp_thread = threading.Thread(target=self._udp_listener, args=(udp_port,), daemon=True)
+        self._udp_thread.start()
+
+        # Control loop at 2 Hz
+        self.timer = self.create_timer(0.5, self.control_loop)
+        self.get_logger().info(f"GPS+IMU Nav started. Listening for base station on UDP port {udp_port}...")
+
+    # ==================================================
+    # UDP Listener (receives base station GPS from laptop)
+    # ==================================================
+    def _udp_listener(self, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('', port))
+
+        while True:
+            try:
+                data, addr = sock.recvfrom(256)
+                msg = data.decode('ascii', errors='ignore').strip()
+                # Expected format: "BASE,39.92505000,32.83695600"
+                if msg.startswith('BASE,'):
+                    parts = msg.split(',')
+                    self.base_lat = float(parts[1])
+                    self.base_lon = float(parts[2])
+            except Exception:
+                pass
+
+    # ==================================================
+    # GPS Callback (rover's own GPS)
+    # ==================================================
+    def gps_cb(self, msg: NavSatFix):
+        if msg.status.status < 0:
+            self.get_logger().warning("NO GPS FIX!", throttle_duration_sec=5.0)
+            return
+        self.current_lat = msg.latitude
+        self.current_lon = msg.longitude
+
+    # ==================================================
+    # IMU Callback — extract yaw (heading) from quaternion
+    # ==================================================
+    def imu_cb(self, msg: Imu):
+        q = msg.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        self.imu_heading = yaw
+
+    # ==================================================
+    # Math helpers
+    # ==================================================
     def haversine_distance(self, lat1, lon1, lat2, lon2):
-        # Returns distance in meters
+        """Returns distance in meters between two GPS coordinates."""
         R = 6371000.0
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
         dlam = math.radians(lon2 - lon1)
-        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        a = (math.sin(dphi / 2) ** 2 +
+             math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return R * c
 
     def calculate_bearing(self, lat1, lon1, lat2, lon2):
-        # Returns bearing in radians (0 = North, positive = East)
+        """Returns bearing in radians (0=North, positive=East)."""
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
         dlam = math.radians(lon2 - lon1)
         x = math.sin(dlam) * math.cos(phi2)
-        y = math.cos(phi1)*math.sin(phi2) - math.sin(phi1)*math.cos(phi2)*math.cos(dlam)
+        y = (math.cos(phi1) * math.sin(phi2) -
+             math.sin(phi1) * math.cos(phi2) * math.cos(dlam))
         return math.atan2(x, y)
 
-    def gps_cb(self, msg: NavSatFix):
-        if msg.status.status < 0:
-            self.get_logger().warning("NO GPS FIX!")
-            return
-            
-        self.current_lat = msg.latitude
-        self.current_lon = msg.longitude
-        
-        # Calculate our heading based on movement
-        if self.prev_lat is not None and self.prev_lon is not None:
-            dist_moved = self.haversine_distance(self.prev_lat, self.prev_lon, self.current_lat, self.current_lon)
-            if dist_moved > 0.5: # Only update heading if we moved at least 0.5 meters (avoids noise)
-                self.current_heading = self.calculate_bearing(self.prev_lat, self.prev_lon, self.current_lat, self.current_lon)
-                self.prev_lat = self.current_lat
-                self.prev_lon = self.current_lon
-        else:
-            self.prev_lat = self.current_lat
-            self.prev_lon = self.current_lon
-
+    # ==================================================
+    # Main control loop (runs at 2 Hz)
+    # ==================================================
     def control_loop(self):
-        if self.current_lat is None:
-            return
-            
-        dist_to_target = self.haversine_distance(self.current_lat, self.current_lon, self.target_lat, self.target_lon)
-        target_bearing = self.calculate_bearing(self.current_lat, self.current_lon, self.target_lat, self.target_lon)
-        
         msg = Twist()
-        
-        if dist_to_target < 2.0:
-            self.get_logger().info("ARRIVED AT TARGET!")
-            msg.linear.x = 0.0
-            msg.angular.z = 0.0
-            self.pub.publish(msg)
+
+        # Wait for all three data sources
+        if self.base_lat is None:
+            self.get_logger().info("Waiting for base station GPS (laptop)...", throttle_duration_sec=3.0)
             return
+        if self.current_lat is None:
+            self.get_logger().info("Waiting for rover GPS fix...", throttle_duration_sec=3.0)
+            return
+        if self.imu_heading is None:
+            self.get_logger().info("Waiting for IMU data...", throttle_duration_sec=3.0)
+            return
+
+        # Calculate distance and bearing to base
+        dist = self.haversine_distance(
+            self.current_lat, self.current_lon,
+            self.base_lat, self.base_lon)
+        target_bearing = self.calculate_bearing(
+            self.current_lat, self.current_lon,
+            self.base_lat, self.base_lon)
 
         # Calculate heading error
-        heading_error = target_bearing - self.current_heading
-        # Normalize to -pi to pi
+        heading_error = target_bearing - self.imu_heading
         heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
-        
-        self.get_logger().info(f"Dist: {dist_to_target:.1f}m | Heading Err: {math.degrees(heading_error):.1f}deg")
-        
-        # Simple Proportional Control
-        msg.linear.x = 0.8 # Constant forward speed
-        
-        if abs(heading_error) > 0.3: # ~17 degrees
-            # Turn aggressively towards target
-            msg.angular.z = 1.0 if heading_error > 0 else -1.0
-            # Slow down forward speed while turning hard
-            msg.linear.x = 0.4
+
+        self.get_logger().info(
+            f"Base: ({self.base_lat:.6f}, {self.base_lon:.6f}) | "
+            f"Dist: {dist:.1f}m | "
+            f"IMU: {math.degrees(self.imu_heading):.1f}° | "
+            f"Bearing: {math.degrees(target_bearing):.1f}° | "
+            f"Error: {math.degrees(heading_error):.1f}°")
+
+        # ROTATE toward base. Stop when aligned.
+        if abs(heading_error) > self.heading_tol:
+            msg.linear.x = 0.0
+            if heading_error > 0:
+                msg.angular.z = 0.5   # Turn left
+            else:
+                msg.angular.z = -0.5  # Turn right
         else:
-            # Minor corrections
-            msg.angular.z = 0.5 * heading_error
-            
+            self.get_logger().info("ALIGNED WITH BASE! Holding position.")
+            msg.linear.x = 0.0
+            msg.angular.z = 0.0
+
         self.pub.publish(msg)
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -112,6 +171,7 @@ def main(args=None):
         rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

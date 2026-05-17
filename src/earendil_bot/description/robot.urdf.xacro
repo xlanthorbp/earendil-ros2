@@ -20,8 +20,6 @@
 <xacro:property name="wheel_density" value ="2710.0"/>
 <xacro:property name="caster_density" value ="2710.0"/>	
 
-<!-- pi constant -->
-<xacro:property name="pi" value="3.14159265358979323846264338327950288419716"/>
 
 <!-- body, wheel, caster mass -->
 <xacro:property name="body_mass" value="${body_density*body_link_x_dim*body_link_y_dim*body_link_z_dim}" />

@@ -44,10 +44,11 @@ WORKDIR /real_ws
 COPY src/earendil_bot/package.xml src/earendil_bot/package.xml
 COPY src/earendil_hardware/package.xml src/earendil_hardware/package.xml
 
-# 2. Install runtime dependencies
+# 2. Install runtime dependencies + I2C/SMBus for IMU
 RUN apt-get update \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src -y \
+    && apt-get install -y python3-smbus i2c-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Copy ONLY the compiled 'install' folder from the builder stage.
