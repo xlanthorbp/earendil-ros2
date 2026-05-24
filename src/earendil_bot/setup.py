@@ -43,7 +43,6 @@ setup(
             'joy_teleop = earendil_bot.joy_teleop:main',
             'simple_motor_bridge = earendil_bot.simple_motor_bridge:main',
             'pure_gps_nav = earendil_bot.pure_gps_nav:main',
-            'gy91_imu_node = earendil_bot.gy91_imu_node:main',
             'imu_heading_test = earendil_bot.imu_heading_test:main',
         ],
     },
