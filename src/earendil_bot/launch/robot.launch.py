@@ -73,31 +73,17 @@ def generate_launch_description():
     #     remappings=[('fix', '/gps/raw_fix')]
     # )
 
-    # ==========================================
-    # IMU (GY-91 / MPU9250 via I2C)
-    # ==========================================
-    gy91_imu_node = Node(
-        package='earendil_bot',
-        executable='gy91_imu_node',
-        output='screen',
-        parameters=[{
-            'i2c_bus': 1,
-            'publish_rate': 20.0,
-            'frame_id': 'imu_link'
-        }]
-    )
-
     return LaunchDescription([
         # Hardware & Core
         robot_state_publisher,
         twist_mux,
-        simple_motor_bridge,
+        simple_motor_bridge,  # Also reads IMU from Arduino and publishes /imu/data
         
-        # Sensors
-        # gps_node,  # Uncomment when GPS is plugged in
-        gy91_imu_node,
+        # GPS (uncomment when plugged in)
+        # gps_node,
 
         # Navigation:
         # Run in a separate terminal:
-        # ros2 run earendil_bot pure_gps_nav --ros-args -p target_lat:=... -p target_lon:=...
+        # ros2 run earendil_bot pure_gps_nav --ros-args -p robot_lat:=... -p base_lat:=...
+        # ros2 run earendil_bot imu_heading_test --ros-args -p robot_lat:=... -p base_lat:=...
     ])

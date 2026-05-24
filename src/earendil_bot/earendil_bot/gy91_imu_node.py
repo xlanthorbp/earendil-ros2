@@ -29,12 +29,18 @@ ACCEL_XOUT_H  = 0x3B
 GYRO_XOUT_H   = 0x43
 WHO_AM_I_MPU  = 0x75
 
-# AK8963 Magnetometer Registers (accessed via I2C bypass)
+# AK8963 Magnetometer Registers (inside MPU9250, accessed via I2C bypass)
 AK8963_ADDR   = 0x0C
 AK8963_CNTL1  = 0x0A
 AK8963_HXL    = 0x03
 AK8963_ST2    = 0x09
 AK8963_WHO    = 0x00
+
+# QMC5883L Magnetometer Registers (GY-271 external module)
+QMC5883L_ADDR = 0x0D
+QMC5883L_DATA = 0x00   # 6 bytes: XL, XH, YL, YH, ZL, ZH
+QMC5883L_CTRL1 = 0x09
+QMC5883L_SET_RESET = 0x0B
 
 # Scale factors
 ACCEL_SCALE = 16384.0   # ±2g  -> LSB/g
@@ -55,17 +61,23 @@ class Gy91ImuNode(Node):
 
         self.bus = None
         self.mag_available = False
+        self.mag_source = None  # 'ak8963' or 'qmc5883l'
 
         try:
             self.bus = smbus.SMBus(bus_num)
             self._init_mpu9250()
-            self._init_ak8963()
+            self._init_magnetometer()
             self.get_logger().info("GY-91 IMU initialized successfully.")
         except Exception as e:
             self.get_logger().error(f"Failed to initialize GY-91: {e}")
             self.get_logger().error("Check I2C wiring and run: sudo i2cdetect -y 1")
 
         self.pub = self.create_publisher(Imu, '/imu/data', 10)
+        
+        # Fallback orientation (Gyro integration)
+        self.gyro_yaw = 0.0
+        self.last_time = self.get_clock().now()
+        
         self.timer = self.create_timer(1.0 / rate, self.publish_imu)
 
     # ==================================================
@@ -85,25 +97,42 @@ class Gy91ImuNode(Node):
         self.bus.write_byte_data(MPU9250_ADDR, INT_PIN_CFG, 0x02)
         time.sleep(0.05)
 
-    def _init_ak8963(self):
-        """Initialize the AK8963 magnetometer in continuous measurement mode."""
+    def _init_magnetometer(self):
+        """Try AK8963 (internal) first, then GY-271 (QMC5883L external)."""
+        # --- Attempt 1: AK8963 (inside MPU9250) ---
         try:
             who = self.bus.read_byte_data(AK8963_ADDR, AK8963_WHO)
             self.get_logger().info(f"AK8963 WHO_AM_I: 0x{who:02X} (expected 0x48)")
-
-            # Power down first
             self.bus.write_byte_data(AK8963_ADDR, AK8963_CNTL1, 0x00)
             time.sleep(0.05)
-
-            # Continuous measurement mode 2 (100 Hz), 16-bit output
             self.bus.write_byte_data(AK8963_ADDR, AK8963_CNTL1, 0x16)
             time.sleep(0.05)
-
             self.mag_available = True
-            self.get_logger().info("AK8963 magnetometer initialized.")
+            self.mag_source = 'ak8963'
+            self.get_logger().info("AK8963 (internal) magnetometer initialized.")
+            return
         except Exception as e:
-            self.get_logger().warn(f"Magnetometer init failed: {e}. Heading will be unavailable.")
-            self.mag_available = False
+            self.get_logger().warn(f"AK8963 failed: {e}")
+
+        # --- Attempt 2: QMC5883L / GY-271 (external module) ---
+        try:
+            # Set/Reset period register
+            self.bus.write_byte_data(QMC5883L_ADDR, QMC5883L_SET_RESET, 0x01)
+            time.sleep(0.05)
+            # Control Register 1: Continuous mode, 200Hz, 8 Gauss, OSR 512
+            self.bus.write_byte_data(QMC5883L_ADDR, QMC5883L_CTRL1, 0x1D)
+            time.sleep(0.05)
+            # Test read
+            self.bus.read_i2c_block_data(QMC5883L_ADDR, QMC5883L_DATA, 6)
+            self.mag_available = True
+            self.mag_source = 'qmc5883l'
+            self.get_logger().info("QMC5883L / GY-271 (external) magnetometer initialized.")
+            return
+        except Exception as e:
+            self.get_logger().warn(f"QMC5883L (GY-271) failed: {e}")
+
+        self.get_logger().warn("No magnetometer found. Using gyro integration for heading.")
+        self.mag_available = False
 
     # ==================================================
     # Sensor Reading
@@ -132,12 +161,20 @@ class Gy91ImuNode(Node):
         if not self.mag_available:
             return None
         try:
-            # AK8963 data is little-endian (unlike MPU9250)
-            data = self.bus.read_i2c_block_data(AK8963_ADDR, AK8963_HXL, 7)
-            # 7th byte (ST2) must be read to signal data read complete
-            mx = struct.unpack('<h', bytes(data[0:2]))[0]
-            my = struct.unpack('<h', bytes(data[2:4]))[0]
-            mz = struct.unpack('<h', bytes(data[4:6]))[0]
+            if self.mag_source == 'ak8963':
+                # AK8963 data is little-endian, 7th byte (ST2) must be read
+                data = self.bus.read_i2c_block_data(AK8963_ADDR, AK8963_HXL, 7)
+                mx = struct.unpack('<h', bytes(data[0:2]))[0]
+                my = struct.unpack('<h', bytes(data[2:4]))[0]
+                mz = struct.unpack('<h', bytes(data[4:6]))[0]
+            elif self.mag_source == 'qmc5883l':
+                # QMC5883L data is little-endian, 6 bytes
+                data = self.bus.read_i2c_block_data(QMC5883L_ADDR, QMC5883L_DATA, 6)
+                mx = struct.unpack('<h', bytes(data[0:2]))[0]
+                my = struct.unpack('<h', bytes(data[2:4]))[0]
+                mz = struct.unpack('<h', bytes(data[4:6]))[0]
+            else:
+                return None
             return [mx, my, mz]
         except Exception:
             return None
@@ -176,8 +213,28 @@ class Gy91ImuNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.frame_id
 
-        # Orientation from magnetometer
-        quat = self._mag_to_quaternion(mag)
+        # Time delta for integration
+        now = self.get_clock().now()
+        dt = (now - self.last_time).nanoseconds / 1e9
+        self.last_time = now
+
+        # Orientation
+        quat = None
+        if self.mag_available and mag is not None:
+            # Use Magnetometer (Pusula)
+            quat = self._mag_to_quaternion(mag)
+        else:
+            # Fallback: Integrate Gyro Z velocity (Jiroskop entegrasyonu)
+            # gyro[2] is angular velocity around Z axis (yaw_rate) in rad/s
+            if abs(gyro[2]) > 0.005:  # small deadzone to prevent drift while sitting still
+                self.gyro_yaw += gyro[2] * dt
+                # Normalize to [-pi, pi]
+                self.gyro_yaw = (self.gyro_yaw + math.pi) % (2 * math.pi) - math.pi
+            
+            qw = math.cos(self.gyro_yaw / 2.0)
+            qz = math.sin(self.gyro_yaw / 2.0)
+            quat = (0.0, 0.0, qz, qw)
+
         if quat is not None:
             msg.orientation.x = quat[0]
             msg.orientation.y = quat[1]
@@ -187,7 +244,6 @@ class Gy91ImuNode(Node):
             msg.orientation_covariance[4] = 0.01
             msg.orientation_covariance[8] = 0.01
         else:
-            # Orientation unknown
             msg.orientation_covariance[0] = -1.0
 
         # Angular velocity (gyroscope)

@@ -1,177 +1,141 @@
 #!/usr/bin/env python3
 """
-Pure GPS + IMU Navigation Node (Auto Base Discovery)
-------------------------------------------------------
-Listens for the base station GPS coordinates over UDP (broadcast),
-uses its own GPS for position and IMU for heading,
-then rotates the robot to face the base station.
+Pure GPS Navigation — Rotate Then Drive
+-----------------------------------------
+Enter robot and base coordinates as parameters.
+The robot uses IMU to rotate toward the base, then drives forward.
+Stops when it reaches the arrival radius.
 
-No manual target_lat / target_lon parameters needed!
-The base station runs 'base_gps_sender.py' on the laptop.
+Usage:
+  ros2 run earendil_bot pure_gps_nav --ros-args \
+    -p robot_lat:=39.925000 -p robot_lon:=32.836000 \
+    -p base_lat:=39.925500 -p base_lon:=32.837000
 """
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import NavSatFix, Imu
+from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Twist
 import math
-import socket
-import threading
 
 
 class PureGpsNav(Node):
     def __init__(self):
         super().__init__('pure_gps_nav')
 
-        self.declare_parameter('heading_tolerance', 0.15)    # radians (~8.5 degrees)
-        self.declare_parameter('udp_port', 5555)             # Must match base_gps_sender.py
+        # Robot position (manual entry)
+        self.declare_parameter('robot_lat', 0.0)
+        self.declare_parameter('robot_lon', 0.0)
 
+        # Base/target position (manual entry)
+        self.declare_parameter('base_lat', 0.0)
+        self.declare_parameter('base_lon', 0.0)
+
+        # Tolerances
+        self.declare_parameter('heading_tolerance', 0.15)  # radians (~8.5 degrees)
+        self.declare_parameter('arrival_radius', 2.0)      # meters
+
+        robot_lat = self.get_parameter('robot_lat').value
+        robot_lon = self.get_parameter('robot_lon').value
+        base_lat = self.get_parameter('base_lat').value
+        base_lon = self.get_parameter('base_lon').value
         self.heading_tol = self.get_parameter('heading_tolerance').value
-        udp_port = self.get_parameter('udp_port').value
+        self.arrival_radius = self.get_parameter('arrival_radius').value
+
+        # Calculate target bearing and distance once (coordinates are fixed)
+        self.target_bearing = self._calculate_bearing(robot_lat, robot_lon, base_lat, base_lon)
+        self.distance = self._haversine(robot_lat, robot_lon, base_lat, base_lon)
+
+        self.get_logger().info(f"Robot : ({robot_lat:.6f}, {robot_lon:.6f})")
+        self.get_logger().info(f"Base  : ({base_lat:.6f}, {base_lon:.6f})")
+        self.get_logger().info(f"Distance : {self.distance:.1f} m")
+        self.get_logger().info(f"Target Bearing : {math.degrees(self.target_bearing):.1f}°")
+        self.get_logger().info(f"Waiting for IMU data on /imu/data ...")
 
         # State
-        self.current_lat = None
-        self.current_lon = None
         self.imu_heading = None
-        self.base_lat = None
-        self.base_lon = None
+        self.aligned = False      # True when robot faces the target
+        self.arrived = False      # True when robot reached the target
 
-        # Publishers & Subscribers
+        # Publisher & Subscriber
         self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
-        self.create_subscription(NavSatFix, '/gps/raw_fix', self.gps_cb, 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
 
-        # Start UDP listener thread for base station coordinates
-        self._udp_thread = threading.Thread(target=self._udp_listener, args=(udp_port,), daemon=True)
-        self._udp_thread.start()
-
-        # Control loop at 2 Hz
+        # Control loop 2 Hz
         self.timer = self.create_timer(0.5, self.control_loop)
-        self.get_logger().info(f"GPS+IMU Nav started. Listening for base station on UDP port {udp_port}...")
 
-    # ==================================================
-    # UDP Listener (receives base station GPS from laptop)
-    # ==================================================
-    def _udp_listener(self, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('', port))
-
-        while True:
-            try:
-                data, addr = sock.recvfrom(256)
-                msg = data.decode('ascii', errors='ignore').strip()
-                # Expected format: "BASE,39.92505000,32.83695600"
-                if msg.startswith('BASE,'):
-                    parts = msg.split(',')
-                    self.base_lat = float(parts[1])
-                    self.base_lon = float(parts[2])
-            except Exception:
-                pass
-
-    # ==================================================
-    # GPS Callback (rover's own GPS)
-    # ==================================================
-    def gps_cb(self, msg: NavSatFix):
-        if msg.status.status < 0:
-            self.get_logger().warning("NO GPS FIX!", throttle_duration_sec=5.0)
-            return
-        self.current_lat = msg.latitude
-        self.current_lon = msg.longitude
-
-    # ==================================================
-    # IMU Callback — extract yaw (heading) from quaternion
-    # ==================================================
     def imu_cb(self, msg: Imu):
         q = msg.orientation
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-        self.imu_heading = yaw
+        self.imu_heading = math.atan2(siny_cosp, cosy_cosp)
 
-    # ==================================================
-    # Math helpers
-    # ==================================================
-    def haversine_distance(self, lat1, lon1, lat2, lon2):
-        """Returns distance in meters between two GPS coordinates."""
-        R = 6371000.0
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        dphi = math.radians(lat2 - lat1)
-        dlam = math.radians(lon2 - lon1)
-        a = (math.sin(dphi / 2) ** 2 +
-             math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        return R * c
-
-    def calculate_bearing(self, lat1, lon1, lat2, lon2):
-        """Returns bearing in radians (0=North, positive=East)."""
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        dlam = math.radians(lon2 - lon1)
-        x = math.sin(dlam) * math.cos(phi2)
-        y = (math.cos(phi1) * math.sin(phi2) -
-             math.sin(phi1) * math.cos(phi2) * math.cos(dlam))
-        return math.atan2(x, y)
-
-    # ==================================================
-    # Main control loop (runs at 2 Hz)
-    # ==================================================
     def control_loop(self):
-        msg = Twist()
+        cmd = Twist()
 
-        # Wait for all three data sources
-        if self.base_lat is None:
-            self.get_logger().info("Waiting for base station GPS (laptop)...", throttle_duration_sec=3.0)
+        if self.arrived:
             return
-        if self.current_lat is None:
-            self.get_logger().info("Waiting for rover GPS fix...", throttle_duration_sec=3.0)
-            return
+
         if self.imu_heading is None:
-            self.get_logger().info("Waiting for IMU data...", throttle_duration_sec=3.0)
+            self.get_logger().info("Waiting for IMU...", throttle_duration_sec=3.0)
             return
 
-        # Calculate distance and bearing to base
-        dist = self.haversine_distance(
-            self.current_lat, self.current_lon,
-            self.base_lat, self.base_lon)
-        target_bearing = self.calculate_bearing(
-            self.current_lat, self.current_lon,
-            self.base_lat, self.base_lon)
-
-        # Calculate heading error
-        heading_error = target_bearing - self.imu_heading
-        heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
+        # Heading error
+        error = self.target_bearing - self.imu_heading
+        error = (error + math.pi) % (2 * math.pi) - math.pi
 
         self.get_logger().info(
-            f"Base: ({self.base_lat:.6f}, {self.base_lon:.6f}) | "
-            f"Dist: {dist:.1f}m | "
             f"IMU: {math.degrees(self.imu_heading):.1f}° | "
-            f"Bearing: {math.degrees(target_bearing):.1f}° | "
-            f"Error: {math.degrees(heading_error):.1f}°")
+            f"Target: {math.degrees(self.target_bearing):.1f}° | "
+            f"Error: {math.degrees(error):.1f}° | "
+            f"Phase: {'DRIVE' if self.aligned else 'ROTATE'}")
 
-        # ROTATE toward base. Stop when aligned.
-        if abs(heading_error) > self.heading_tol:
-            msg.linear.x = 0.0
-            if heading_error > 0:
-                msg.angular.z = 0.5   # Turn left
+        # PHASE 1: Rotate toward target
+        if not self.aligned:
+            if abs(error) > self.heading_tol:
+                cmd.angular.z = 0.5 if error > 0 else -0.5
+                cmd.linear.x = 0.0
             else:
-                msg.angular.z = -0.5  # Turn right
-        else:
-            self.get_logger().info("ALIGNED WITH BASE! Holding position.")
-            msg.linear.x = 0.0
-            msg.angular.z = 0.0
+                self.aligned = True
+                self.get_logger().info("ALIGNED! Switching to DRIVE phase.")
 
-        self.pub.publish(msg)
+        # PHASE 2: Drive forward with corrections
+        if self.aligned:
+            if abs(error) > self.heading_tol * 3:
+                # Large deviation — stop and re-align
+                self.aligned = False
+                self.get_logger().info("Lost alignment! Re-rotating...")
+                cmd.linear.x = 0.0
+                cmd.angular.z = 0.5 if error > 0 else -0.5
+            else:
+                # Drive forward with proportional steering correction
+                cmd.linear.x = 0.5
+                cmd.angular.z = 0.3 * error
+
+        self.pub.publish(cmd)
+
+    # ---- Math ----
+    def _haversine(self, lat1, lon1, lat2, lon2):
+        R = 6371000.0
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dp = math.radians(lat2 - lat1)
+        dl = math.radians(lon2 - lon1)
+        a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+    def _calculate_bearing(self, lat1, lon1, lat2, lon2):
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dl = math.radians(lon2 - lon1)
+        x = math.sin(dl) * math.cos(p2)
+        y = math.cos(p1)*math.sin(p2) - math.sin(p1)*math.cos(p2)*math.cos(dl)
+        return math.atan2(x, y)
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = PureGpsNav()
-    if rclpy.ok():
-        rclpy.spin(node)
+    rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
