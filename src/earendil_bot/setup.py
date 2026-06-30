@@ -44,6 +44,8 @@ setup(
             'simple_motor_bridge = earendil_bot.simple_motor_bridge:main',
             'pure_gps_nav = earendil_bot.pure_gps_nav:main',
             'imu_heading_test = earendil_bot.imu_heading_test:main',
+            'mag_heading_node = earendil_bot.mag_heading_node:main',
+            'mag_turn_test = earendil_bot.mag_turn_test:main',
         ],
     },
 )
