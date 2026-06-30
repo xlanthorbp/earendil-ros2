@@ -46,6 +46,7 @@ setup(
             'imu_heading_test = earendil_bot.imu_heading_test:main',
             'mag_heading_node = earendil_bot.mag_heading_node:main',
             'mag_turn_test = earendil_bot.mag_turn_test:main',
+            'motor_mag_bridge = earendil_bot.motor_mag_bridge:main',
         ],
     },
 )

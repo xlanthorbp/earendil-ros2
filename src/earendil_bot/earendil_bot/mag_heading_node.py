@@ -64,8 +64,19 @@ class MagHeadingNode(Node):
                 if not line.startswith("MAG,"):
                     continue
 
-                value_str = line.split(',')[1]
-                if value_str == "ERR":
+                parts = line.split(',')
+
+                # Support both formats:
+                #   Old: MAG,heading           (2 fields, heading at index 1)
+                #   New: MAG,time_ms,heading,... (13 fields, heading at index 2)
+                if len(parts) == 2:
+                    value_str = parts[1]
+                elif len(parts) >= 3:
+                    value_str = parts[2]
+                else:
+                    continue
+
+                if value_str == "ERR" or value_str == "ERR_MAG_READ_FAIL":
                     self.get_logger().warn(
                         "Magnetometer read error from Arduino",
                         throttle_duration_sec=5.0)
