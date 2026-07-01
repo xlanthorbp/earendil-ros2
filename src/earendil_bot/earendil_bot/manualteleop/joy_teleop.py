@@ -24,6 +24,8 @@ class JoyTeleop(Node):
         self.max_linear = self.get_parameter('max_linear_speed').value
         self.max_angular = self.get_parameter('max_angular_speed').value
         self.deadzone = self.get_parameter('deadzone').value
+        
+        self.was_zero = False
 
         self.pub = self.create_publisher(Twist, 'cmd_vel_joy', 10)
         self.sub = self.create_subscription(Joy, 'joy', self.joy_callback, 10)
@@ -48,6 +50,18 @@ class JoyTeleop(Node):
             if abs(raw_angular) < self.deadzone:
                 raw_angular = 0.0
 
+            # Eğer joystick tamamen ortadaysa (sıfır), sürekli 0 yayınlama.
+            # Sadece ilk bırakıldığında 1 kez 0 yayınla ki motorlar dursun.
+            # Yoksa otonom sürüşü (cmd_vel_nav) sonsuza kadar bloke eder!
+            if raw_linear == 0.0 and raw_angular == 0.0:
+                if not self.was_zero:
+                    twist.linear.x = 0.0
+                    twist.angular.z = 0.0
+                    self.pub.publish(twist)
+                    self.was_zero = True
+                return
+
+            self.was_zero = False
             twist.linear.x = raw_linear * self.max_linear
             twist.angular.z = raw_angular * self.max_angular
 

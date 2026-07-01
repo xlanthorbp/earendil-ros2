@@ -64,7 +64,7 @@ class GpsNavTest(Node):
         self.arrived = False      # True when robot reached the target
 
         # Publisher & Subscriber
-        self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
+        self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
 
         # Control loop 10 Hz

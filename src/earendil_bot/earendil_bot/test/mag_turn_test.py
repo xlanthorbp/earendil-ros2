@@ -64,7 +64,7 @@ class MagTurnTest(Node):
         self.aligned = False
 
         # Publisher & Subscriber
-        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
         self.create_subscription(
             Float32, '/mag/heading', self.heading_cb, 10)
 
@@ -100,10 +100,14 @@ class MagTurnTest(Node):
 
         if abs(error) > self.tolerance:
             # P-Controller logic
-            kp = 0.05  # degrees to rad/s (0.05 * 10 deg = 0.5 rad/s)
+            kp = 0.02  # Yumuşak frenleme için 0.05'ten 0.02'ye düşürüldü
             angular_vel = kp * error
-            if angular_vel > self.turn_speed: angular_vel = self.turn_speed
-            elif angular_vel < -self.turn_speed: angular_vel = -self.turn_speed
+            
+            # Dönüş hızı çok yüksekse limitle
+            turn_limit = 0.35  # Daha yavaş dönüş (önceki: 0.5)
+            if angular_vel > turn_limit: angular_vel = turn_limit
+            elif angular_vel < -turn_limit: angular_vel = -turn_limit
+            
             cmd.angular.z = angular_vel
             cmd.linear.x = 0.0
         else:
