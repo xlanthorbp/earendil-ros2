@@ -6,6 +6,6 @@ test_nodes:
     heading_tolerance_rad: 0.15      # radyan (yaklaşık 8.5 derece)
     heading_tolerance_deg: 8.5       # derece
     arrival_radius: 2.0              # metre
-    turn_speed: 0.5                  # rad/s
+    turn_speed: 0.25                  # rad/s
     drive_speed: 0.5                 # m/s
     steer_kp: 0.3                    # Oransal direksiyon katsayısı

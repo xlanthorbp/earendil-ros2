@@ -103,10 +103,9 @@ class MagTurnTest(Node):
             kp = 0.02  # Yumuşak frenleme için 0.05'ten 0.02'ye düşürüldü
             angular_vel = kp * error
             
-            # Dönüş hızı çok yüksekse limitle
-            turn_limit = 0.35  # Daha yavaş dönüş (önceki: 0.5)
-            if angular_vel > turn_limit: angular_vel = turn_limit
-            elif angular_vel < -turn_limit: angular_vel = -turn_limit
+            # Dönüş hızı çok yüksekse limitle (ROS Parametresinden gelir, varsayılan 0.5)
+            if angular_vel > self.turn_speed: angular_vel = self.turn_speed
+            elif angular_vel < -self.turn_speed: angular_vel = -self.turn_speed
             
             cmd.angular.z = angular_vel
             cmd.linear.x = 0.0
