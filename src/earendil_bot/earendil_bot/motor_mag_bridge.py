@@ -23,11 +23,12 @@ Usage:
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, String
 from sensor_msgs.msg import Imu
 import serial
 import math
 import threading
+import time
 
 
 class MotorMagBridge(Node):
@@ -39,13 +40,16 @@ class MotorMagBridge(Node):
         self.declare_parameter('baud', 115200)
         self.declare_parameter('min_pwm', 60)    # Minimum PWM for motor to move
         self.declare_parameter('max_pwm', 255)   # Maximum PWM
+        self.declare_parameter('heading_offset', 0.0)
 
         port = self.get_parameter('port').value
         baud = self.get_parameter('baud').value
         self.min_pwm = self.get_parameter('min_pwm').value
         self.max_pwm = self.get_parameter('max_pwm').value
+        self.heading_offset = self.get_parameter('heading_offset').value
 
         self.last_cmd = None
+        self.last_cmd_time = 0.0
         self.serial_lock = threading.Lock()
 
         # Serial connection
@@ -62,6 +66,7 @@ class MotorMagBridge(Node):
         # Magnetometer publishers
         self.heading_pub = self.create_publisher(Float32, '/mag/heading', 10)
         self.imu_pub = self.create_publisher(Imu, '/imu/data', 10)
+        self.raw_pub = self.create_publisher(String, '/arduino/raw_line', 10)
 
         # Watchdog keepalive: Arduino stops motors after 700ms without command.
         # Resend the last active command every 500ms to prevent watchdog trigger.
@@ -69,9 +74,21 @@ class MotorMagBridge(Node):
 
         # Start serial reader thread
         if self.ser:
+            self.serial_buffer = ""
             self._thread = threading.Thread(
                 target=self._serial_reader, daemon=True)
             self._thread.start()
+
+    def destroy_node(self):
+        """Called when the node is shut down (Ctrl+C)."""
+        if self.ser and self.ser.is_open:
+            try:
+                self.ser.write(b"MOTOR:STOP\n")
+                self.ser.close()
+                self.get_logger().info("Sent MOTOR:STOP before exit.")
+            except Exception:
+                pass
+        super().destroy_node()
 
     # ==================================================
     # Motor: Twist -> MOTOR:CMD:PWM -> Arduino
@@ -112,12 +129,22 @@ class MotorMagBridge(Node):
         if cmd != self.last_cmd:
             self._send_raw(cmd)
             self.last_cmd = cmd
+            self.last_cmd_time = time.time()
             self.get_logger().info(f"Motor: {cmd}")
+        else:
+            # Update time even if command hasn't changed to keep watchdog happy
+            self.last_cmd_time = time.time()
 
     def _keepalive(self):
         """Resend last active motor command to prevent Arduino watchdog."""
-        if self.last_cmd and self.last_cmd != "MOTOR:STOP" and self.ser:
-            self._send_raw(self.last_cmd)
+        if self.last_cmd and self.last_cmd != "MOTOR:STOP":
+            if time.time() - self.last_cmd_time > 1.0:
+                self.last_cmd = "MOTOR:STOP"
+                if self.ser:
+                    self._send_raw(self.last_cmd)
+                self.get_logger().warn("CmdVel Watchdog triggered! Stopping motors.", throttle_duration_sec=2.0)
+            elif self.ser:
+                self._send_raw(self.last_cmd)
 
     def _send_raw(self, cmd):
         """Send a raw string command to Arduino."""
@@ -132,32 +159,47 @@ class MotorMagBridge(Node):
     # Serial Reader: Arduino -> MAG Telemetry -> ROS
     # ==================================================
     def _serial_reader(self):
-        """Background thread that reads all lines from Arduino."""
+        """Background thread that reads all lines from Arduino robustly."""
         while rclpy.ok():
             try:
-                with self.serial_lock:
-                    if self.ser.in_waiting > 0:
-                        line = self.ser.readline().decode(
-                            'ascii', errors='ignore').strip()
-                    else:
-                        line = None
+                # Sadece veri varsa oku (bloklanmayı önler)
+                waiting = self.ser.in_waiting
+                if waiting > 0:
+                    with self.serial_lock:
+                        chunk = self.ser.read(waiting).decode('ascii', errors='ignore')
+                    
+                    self.serial_buffer += chunk
+                    
+                    # Tam satırları ayıkla
+                    while '\n' in self.serial_buffer:
+                        line, self.serial_buffer = self.serial_buffer.split('\n', 1)
+                        line = line.strip()
+                        
+                        if not line:
+                            continue
 
-                if not line:
-                    continue
+                        # Ham veriyi yayınla (Debug için)
+                        raw_msg = String()
+                        raw_msg.data = line
+                        self.raw_pub.publish(raw_msg)
 
-                # MAG telemetry line
-                if line.startswith("MAG,"):
-                    self._parse_mag_telemetry(line)
+                        # MAG telemetry line
+                        if line.startswith("MAG,"):
+                            self._parse_mag_telemetry(line)
 
-                # Log warnings and errors from Arduino
-                elif line.startswith("WARN,"):
-                    self.get_logger().warn(f"Arduino: {line}")
-                elif line.startswith("ERR,"):
-                    self.get_logger().error(f"Arduino: {line}")
+                        # Log warnings and errors from Arduino
+                        elif line.startswith("WARN,"):
+                            self.get_logger().warn(f"Arduino: {line}")
+                        elif line.startswith("ERR,"):
+                            self.get_logger().error(f"Arduino: {line}")
+                else:
+                    # CPU'yu yormamak için kısa bir uyku
+                    time.sleep(0.01)
 
             except serial.SerialException as e:
                 self.get_logger().error(
                     f"Serial read error: {e}", throttle_duration_sec=5.0)
+                time.sleep(1.0)
             except Exception:
                 pass
 
@@ -168,7 +210,8 @@ class MotorMagBridge(Node):
             if len(parts) < 3:
                 return
 
-            heading_deg = float(parts[2])
+            heading_deg = float(parts[2]) + self.heading_offset
+            heading_deg = (heading_deg + 360.0) % 360.0
 
             # Publish raw heading (degrees)
             h_msg = Float32()

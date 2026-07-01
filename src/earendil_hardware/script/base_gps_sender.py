@@ -2,14 +2,14 @@
 """
 Base Station GPS Sender
 ------------------------
-Runs on your LAPTOP (Monster). Reads GPS from a USB module,
+Runs on your LAPTOP. Reads GPS from a USB module,
 broadcasts the coordinates over WiFi (UDP) so the rover can find you.
 
 Usage:
     python3 base_gps_sender.py              # Default port: /dev/ttyUSB0
     python3 base_gps_sender.py /dev/ttyACM0 # Custom port
 
-The rover's pure_gps_nav.py listens for these broadcasts automatically.
+The rover's gps_nav_test.py listens for these broadcasts automatically.
 No IP address configuration needed — it uses UDP broadcast.
 """
 import serial

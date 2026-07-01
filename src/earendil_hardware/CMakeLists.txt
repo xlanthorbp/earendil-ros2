@@ -8,8 +8,14 @@ find_package(ament_cmake REQUIRED)
 # All motor/sensor communication is handled by Python nodes
 # in the earendil_bot package via serial.
 
-install(DIRECTORY hcode/
-  DESTINATION share/${PROJECT_NAME}/hcode
+install(DIRECTORY arduino/
+  DESTINATION share/${PROJECT_NAME}/arduino
+)
+
+install(PROGRAMS 
+  script/base_gps_sender.py
+  script/raspberryesp.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

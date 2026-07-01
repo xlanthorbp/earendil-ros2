@@ -7,13 +7,18 @@ class ArduinoJoyNode(Node):
     def __init__(self):
         super().__init__('arduino_joy_node')
         self.publisher_ = self.create_publisher(Joy, 'joy', 10)
+        self.declare_parameter('port', '/dev/ttyUSB0')
+        self.declare_parameter('baud', 115200)
+        
+        port = self.get_parameter('port').value
+        baud = self.get_parameter('baud').value
         
         # NOTE: Check your Arduino port! It might be /dev/ttyACM0 or /dev/ttyUSB0
         try:
-            self.serial_port = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+            self.serial_port = serial.Serial(port, baud, timeout=1)
             self.timer = self.create_timer(0.05, self.timer_callback) # 20 Hz
         except serial.serialutil.SerialException:
-            self.get_logger().warn("Arduino joystick not found at /dev/ttyUSB0. Running without joystick control.")
+            self.get_logger().warn(f"Arduino joystick not found at {port}. Running without joystick control.")
             self.serial_port = None
 
     def timer_callback(self):

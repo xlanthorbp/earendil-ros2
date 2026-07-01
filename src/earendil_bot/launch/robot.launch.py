@@ -44,14 +44,13 @@ def generate_launch_description():
     # ==========================================
     # Motor Control (Open-Loop Bridge)
     # ==========================================
-    simple_motor_bridge = Node(
+    motor_mag_bridge = Node(
         package='earendil_bot',
-        executable='simple_motor_bridge',
+        executable='motor_mag_bridge',
         output='screen',
         parameters=[{
             'port': '/dev/ttyACM0',
-            'baud': 115200,
-            'wheel_base': 0.6
+            'baud': 115200
         }]
     )
 
@@ -77,13 +76,13 @@ def generate_launch_description():
         # Hardware & Core
         robot_state_publisher,
         twist_mux,
-        simple_motor_bridge,  # Also reads IMU from Arduino and publishes /imu/data
+        motor_mag_bridge,  # Also reads IMU from Arduino and publishes /imu/data
         
         # GPS (uncomment when plugged in)
         # gps_node,
 
         # Navigation:
         # Run in a separate terminal:
-        # ros2 run earendil_bot pure_gps_nav --ros-args -p robot_lat:=... -p base_lat:=...
-        # ros2 run earendil_bot imu_heading_test --ros-args -p robot_lat:=... -p base_lat:=...
+        # ros2 run earendil_bot gps_nav_test --ros-args -p robot_lat:=... -p base_lat:=...
+        # ros2 run earendil_bot imu_turn_test --ros-args -p robot_lat:=... -p base_lat:=...
     ])

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-IMU Heading Test — Rotate Toward Base
+IMU Turn Test — Rotate Toward Base
 ---------------------------------------
 Manual coordinate entry version. No GPS hardware needed.
 Enter robot and base coordinates as parameters,
 the robot uses IMU to rotate toward the base.
 
 Usage:
-  ros2 run earendil_bot imu_heading_test --ros-args \
+  ros2 run earendil_bot imu_turn_test --ros-args \
     -p robot_lat:=39.925000 -p robot_lon:=32.836000 \
     -p base_lat:=39.925500 -p base_lon:=32.837000
 """
@@ -16,11 +16,13 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Twist
 import math
+import time
+from earendil_bot.utils.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
 
 
-class ImuHeadingTest(Node):
+class ImuTurnTest(Node):
     def __init__(self):
-        super().__init__('imu_heading_test')
+        super().__init__('imu_turn_test')
 
         # Robot position (manual entry)
         self.declare_parameter('robot_lat', 0.0)
@@ -30,18 +32,21 @@ class ImuHeadingTest(Node):
         self.declare_parameter('base_lat', 0.0)
         self.declare_parameter('base_lon', 0.0)
 
-        # Tolerance
         self.declare_parameter('heading_tolerance', 0.15)  # ~8.5 degrees
+        self.declare_parameter('invert_turn', False)
+        self.declare_parameter('dry_run', False)
 
         robot_lat = self.get_parameter('robot_lat').value
         robot_lon = self.get_parameter('robot_lon').value
         base_lat = self.get_parameter('base_lat').value
         base_lon = self.get_parameter('base_lon').value
         self.heading_tol = self.get_parameter('heading_tolerance').value
+        self.invert_turn = self.get_parameter('invert_turn').value
+        self.dry_run = self.get_parameter('dry_run').value
 
         # Calculate target bearing once (coordinates are fixed)
-        self.target_bearing = self._calculate_bearing(robot_lat, robot_lon, base_lat, base_lon)
-        dist = self._haversine(robot_lat, robot_lon, base_lat, base_lon)
+        self.target_bearing = bearing_between_gps_rad(robot_lat, robot_lon, base_lat, base_lon)
+        dist = haversine(robot_lat, robot_lon, base_lat, base_lon)
 
         self.get_logger().info(f"Robot : ({robot_lat:.6f}, {robot_lon:.6f})")
         self.get_logger().info(f"Base  : ({base_lat:.6f}, {base_lon:.6f})")
@@ -51,30 +56,34 @@ class ImuHeadingTest(Node):
 
         # State
         self.imu_heading = None
+        self.last_imu_time = 0.0
 
         # Publisher & Subscriber
         self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
 
-        # Control loop 2 Hz
-        self.timer = self.create_timer(0.5, self.control_loop)
+        # Control loop 10 Hz
+        self.timer = self.create_timer(0.1, self.control_loop)
 
     def imu_cb(self, msg: Imu):
         q = msg.orientation
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         self.imu_heading = math.atan2(siny_cosp, cosy_cosp)
+        self.last_imu_time = time.time()
 
     def control_loop(self):
         cmd = Twist()
 
-        if self.imu_heading is None:
-            self.get_logger().info("Waiting for IMU...", throttle_duration_sec=3.0)
+        if self.imu_heading is None or (time.time() - self.last_imu_time > 1.0):
+            self.get_logger().warn("IMU Watchdog triggered! Sensor lost or waiting.", throttle_duration_sec=3.0)
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.0
+            self.pub.publish(cmd)
             return
 
         # Heading error
-        error = self.target_bearing - self.imu_heading
-        error = (error + math.pi) % (2 * math.pi) - math.pi
+        error = angle_error_rad(self.target_bearing, self.imu_heading)
 
         self.get_logger().info(
             f"IMU: {math.degrees(self.imu_heading):.1f}° | "
@@ -82,34 +91,32 @@ class ImuHeadingTest(Node):
             f"Error: {math.degrees(error):.1f}°")
 
         if abs(error) > self.heading_tol:
-            cmd.angular.z = 0.5 if error > 0 else -0.5
+            # P-Controller logic
+            kp = 2.0
+            angular_vel = kp * error
+            if angular_vel > 0.5: angular_vel = 0.5
+            elif angular_vel < -0.5: angular_vel = -0.5
+            cmd.angular.z = angular_vel
         else:
             self.get_logger().info("ALIGNED WITH BASE!")
             cmd.angular.z = 0.0
 
+        if self.invert_turn:
+            cmd.angular.z = -cmd.angular.z
+
+        if self.dry_run:
+            cmd.angular.z = 0.0
+            cmd.linear.x = 0.0
+            
         cmd.linear.x = 0.0
         self.pub.publish(cmd)
 
-    # ---- Math ----
-    def _haversine(self, lat1, lon1, lat2, lon2):
-        R = 6371000.0
-        p1, p2 = math.radians(lat1), math.radians(lat2)
-        dp = math.radians(lat2 - lat1)
-        dl = math.radians(lon2 - lon1)
-        a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
-    def _calculate_bearing(self, lat1, lon1, lat2, lon2):
-        p1, p2 = math.radians(lat1), math.radians(lat2)
-        dl = math.radians(lon2 - lon1)
-        x = math.sin(dl) * math.cos(p2)
-        y = math.cos(p1)*math.sin(p2) - math.sin(p1)*math.cos(p2)*math.cos(dl)
-        return math.atan2(x, y)
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ImuHeadingTest()
+    node = ImuTurnTest()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

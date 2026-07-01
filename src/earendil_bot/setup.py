@@ -23,6 +23,7 @@ setup(
             'config/ukf_global.yaml',
             'config/navsat.yaml',
             'config/controllers.yaml',
+            'config/test_params.yaml',
         ]),
 
     ],
@@ -39,13 +40,13 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'arduino_joy = earendil_bot.arduino_joy:main',
-            'joy_teleop = earendil_bot.joy_teleop:main',
+            'arduino_joy = earendil_bot.manualteleop.arduino_joy:main',
+            'joy_teleop = earendil_bot.manualteleop.joy_teleop:main',
             'simple_motor_bridge = earendil_bot.simple_motor_bridge:main',
-            'pure_gps_nav = earendil_bot.pure_gps_nav:main',
-            'imu_heading_test = earendil_bot.imu_heading_test:main',
+            'gps_nav_test = earendil_bot.test.gps_nav_test:main',
+            'imu_turn_test = earendil_bot.test.imu_turn_test:main',
             'mag_heading_node = earendil_bot.mag_heading_node:main',
-            'mag_turn_test = earendil_bot.mag_turn_test:main',
+            'mag_turn_test = earendil_bot.test.mag_turn_test:main',
             'motor_mag_bridge = earendil_bot.motor_mag_bridge:main',
         ],
     },
