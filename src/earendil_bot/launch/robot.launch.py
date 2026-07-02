@@ -50,7 +50,9 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'port': '/dev/ttyACM0',
-            'baud': 115200
+            'baud': 115200,
+            'min_pwm': 65,
+            'max_pwm': 90
         }]
     )
 

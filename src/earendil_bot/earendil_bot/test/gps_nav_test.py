@@ -33,7 +33,7 @@ class GpsNavTest(Node):
         self.declare_parameter('base_lon', 0.0)
 
         # Tolerances
-        self.declare_parameter('heading_tolerance', 0.15)  # radians (~8.5 degrees)
+        self.declare_parameter('heading_tolerance', 0.122)  # radians (~7.0 degrees)
         self.declare_parameter('arrival_radius', 2.0)      # meters
         self.declare_parameter('invert_turn', False)
         self.declare_parameter('dry_run', False)
@@ -64,7 +64,8 @@ class GpsNavTest(Node):
         self.arrived = False      # True when robot reached the target
 
         # Publisher & Subscriber
-        self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # twist_mux kullanıldığı için doğrudan cmd_vel yerine cmd_vel_nav'a yayın yapıyoruz
+        self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
 
         # Control loop 10 Hz
@@ -102,10 +103,10 @@ class GpsNavTest(Node):
         # PHASE 1: Rotate toward target
         if not self.aligned:
             if abs(error) > self.heading_tol:
-                kp = 2.0
+                kp = 3.44  # 25 derece (0.436 rad) hatada tam 1.5 rad/s hıza ulaştırır
                 angular_vel = kp * error
-                if angular_vel > 0.5: angular_vel = 0.5
-                elif angular_vel < -0.5: angular_vel = -0.5
+                if angular_vel > 1.5: angular_vel = 1.5
+                elif angular_vel < -1.5: angular_vel = -1.5
                 cmd.angular.z = angular_vel
                 cmd.linear.x = 0.0
             else:
@@ -119,10 +120,10 @@ class GpsNavTest(Node):
                 self.aligned = False
                 self.get_logger().info("Lost alignment! Re-rotating...")
                 cmd.linear.x = 0.0
-                kp = 2.0
+                kp = 3.44
                 angular_vel = kp * error
-                if angular_vel > 0.5: angular_vel = 0.5
-                elif angular_vel < -0.5: angular_vel = -0.5
+                if angular_vel > 1.5: angular_vel = 1.5
+                elif angular_vel < -1.5: angular_vel = -1.5
                 cmd.angular.z = angular_vel
             else:
                 # Drive forward with proportional steering correction

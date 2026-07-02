@@ -48,6 +48,8 @@ setup(
             'mag_heading_node = earendil_bot.mag_heading_node:main',
             'mag_turn_test = earendil_bot.test.mag_turn_test:main',
             'motor_mag_bridge = earendil_bot.motor_mag_bridge:main',
+            'rover_rtk_node = earendil_bot.rover_rtk_node:main',
+            'gps_waypoint_follower = earendil_bot.gps_waypoint_follower:main',
         ],
     },
 )

@@ -31,8 +31,8 @@ class MagTurnTest(Node):
         self.declare_parameter('base_lon', 0.0)
 
         # Tolerances
-        self.declare_parameter('heading_tolerance', 10.0)  # degrees
-        self.declare_parameter('turn_speed', 0.5)          # rad/s
+        self.declare_parameter('heading_tolerance', 7.0)  # degrees
+        self.declare_parameter('turn_speed', 1.5)         # rad/s (1.5 rad/s = 90 PWM)
         self.declare_parameter('invert_turn', False)
         self.declare_parameter('dry_run', False)
 
@@ -64,7 +64,8 @@ class MagTurnTest(Node):
         self.aligned = False
 
         # Publisher & Subscriber
-        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # twist_mux kullanıldığı için doğrudan cmd_vel yerine cmd_vel_nav'a yayın yapıyoruz
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.create_subscription(
             Float32, '/mag/heading', self.heading_cb, 10)
 
@@ -100,7 +101,8 @@ class MagTurnTest(Node):
 
         if abs(error) > self.tolerance:
             # P-Controller logic
-            kp = 0.02  # Yumuşak frenleme için 0.05'ten 0.02'ye düşürüldü
+            # Hata 25 dereceyken hızı 1.5 rad/s (yani 90 PWM) yapacak P katsayısı: 1.5 / 25 = 0.06
+            kp = 0.06
             angular_vel = kp * error
             
             # Dönüş hızı çok yüksekse limitle (ROS Parametresinden gelir, varsayılan 0.5)
