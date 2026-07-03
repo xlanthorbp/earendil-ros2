@@ -51,7 +51,7 @@ setup(
             'rover_rtk_node = earendil_bot.rover_rtk_node:main',
             'gps_waypoint_follower = earendil_bot.gps_waypoint_follower:main',
             'tunnel_navigator = earendil_bot.tunnel_navigator:main',
-            'sonar_bridge = earendil_bot.sonar_bridge:main',
+            'ir_bridge = earendil_bot.ir_bridge:main',
         ],
     },
 )

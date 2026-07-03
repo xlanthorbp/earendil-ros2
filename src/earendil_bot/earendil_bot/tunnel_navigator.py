@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan, Range
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Float32
 import math
 
 class TunnelNavigatorNode(Node):
@@ -9,8 +10,9 @@ class TunnelNavigatorNode(Node):
         super().__init__('tunnel_navigator')
         
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.height_pub = self.create_publisher(Float32, '/current_tunnel_height', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.top_sonar_sub = self.create_subscription(Range, '/sonar_top', self.top_sonar_callback, 10)
+        self.top_sonar_sub = self.create_subscription(Range, '/ir_top', self.top_sonar_callback, 10)
         
         # Tünel yüksekliği hesaplama için
         self.sensor_height_from_ground = 1.0  # metre cinsinden değiştirilebilir sabit
@@ -44,6 +46,11 @@ class TunnelNavigatorNode(Node):
                 # En yüksek değeri kaydet
                 if total_height > self.max_tunnel_height:
                     self.max_tunnel_height = total_height
+                    
+                # Anlık ölçülen tünel yüksekliğini topiğe bas
+                height_msg = Float32()
+                height_msg.data = total_height
+                self.height_pub.publish(height_msg)
 
     def get_avg_distance(self, msg, target_angle_deg, window_deg=10.0):
         target_rad = math.radians(target_angle_deg)
@@ -70,6 +77,16 @@ class TunnelNavigatorNode(Node):
         return sum(valid_ranges) / len(valid_ranges)
 
     def scan_callback(self, msg):
+        # Ön tarafta engel algılama (20 cm)
+        front_dist = self.get_avg_distance(msg, 0.0)
+        if front_dist < 0.20:
+            self.get_logger().warn(f'ÖNDE ENGEL VAR ({front_dist:.2f}m)! Geçene kadar bekleniyor...', throttle_duration_sec=1.0)
+            twist = Twist()
+            twist.linear.x = 0.0
+            twist.angular.z = 0.0
+            self.cmd_pub.publish(twist)
+            return # İşlemi durdur ama kodu kapatma (engel çekilince devam eder)
+            
         left_dist = self.get_avg_distance(msg, 90.0)
         right_dist = self.get_avg_distance(msg, -90.0)
         
