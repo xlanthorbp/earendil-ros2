@@ -70,18 +70,6 @@ class TunnelNavigatorNode(Node):
         return sum(valid_ranges) / len(valid_ranges)
 
     def scan_callback(self, msg):
-        front_dist = self.get_avg_distance(msg, 0.0)
-        
-        # Çarpışma önleme: Ön tarafta 1.3 metreden yakın engel varsa dur ve çık
-        if front_dist < 1.3:
-            self.get_logger().fatal(f'ÖN TARAFTA ENGEL TESPIT EDİLDİ ({front_dist:.2f}m)! Motorlar durduruluyor.')
-            twist = Twist()
-            twist.linear.x = 0.0
-            twist.angular.z = 0.0
-            self.cmd_pub.publish(twist)
-            import sys
-            sys.exit(0)
-            
         left_dist = self.get_avg_distance(msg, 90.0)
         right_dist = self.get_avg_distance(msg, -90.0)
         
@@ -94,6 +82,7 @@ class TunnelNavigatorNode(Node):
                 self.state = 'IN_TUNNEL'
                 self.tunnel_start_time = self.get_clock().now() # Tünele giriş anını kaydet
             else:
+                self.get_logger().info('Tünel aranıyor, dümdüz ileri gidiliyor...', throttle_duration_sec=2.0)
                 twist.linear.x = self.forward_speed_approach
                 
         if self.state == 'IN_TUNNEL':
@@ -112,6 +101,7 @@ class TunnelNavigatorNode(Node):
                     twist.linear.x = self.safety_speed
                     twist.angular.z = 0.8 # Sert sol
                 else:
+                    self.get_logger().info('Tünelde ortalanarak ileri gidiliyor...', throttle_duration_sec=2.0)
                     # Oransal (P) Kontrol ile Ortalama
                     error = left_dist - right_dist
                     twist.linear.x = self.forward_speed_tunnel
