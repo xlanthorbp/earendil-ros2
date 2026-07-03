@@ -3,6 +3,7 @@ build/
 install/
 log/
 *.log
+*.json
 
 # MATLAB/Simulink
 *.asv
