@@ -36,7 +36,7 @@ class MotorMagBridge(Node):
         super().__init__('motor_mag_bridge')
 
         # Parameters
-        self.declare_parameter('port', '/dev/ttyACM0')
+        self.declare_parameter('port', '/dev/ttyUSB1')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('min_pwm', 60)    # Minimum PWM for motor to move
         self.declare_parameter('max_pwm', 255)   # Maximum PWM
@@ -162,7 +162,7 @@ class MotorMagBridge(Node):
         """Background thread that reads all lines from Arduino robustly."""
         while rclpy.ok():
             try:
-                # Sadece veri varsa oku (bloklanmayı önler)
+                # Read only if data is available (prevents blocking)
                 waiting = self.ser.in_waiting
                 if waiting > 0:
                     with self.serial_lock:
@@ -170,7 +170,7 @@ class MotorMagBridge(Node):
                     
                     self.serial_buffer += chunk
                     
-                    # Tam satırları ayıkla
+                    # Extract full lines
                     while '\n' in self.serial_buffer:
                         line, self.serial_buffer = self.serial_buffer.split('\n', 1)
                         line = line.strip()
@@ -178,7 +178,7 @@ class MotorMagBridge(Node):
                         if not line:
                             continue
 
-                        # Ham veriyi yayınla (Debug için)
+                        # Publish raw data (For Debugging)
                         raw_msg = String()
                         raw_msg.data = line
                         self.raw_pub.publish(raw_msg)
@@ -193,7 +193,7 @@ class MotorMagBridge(Node):
                         elif line.startswith("ERR,"):
                             self.get_logger().error(f"Arduino: {line}")
                 else:
-                    # CPU'yu yormamak için kısa bir uyku
+                    # Short sleep to avoid high CPU usage
                     time.sleep(0.01)
 
             except serial.SerialException as e:

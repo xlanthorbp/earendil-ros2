@@ -17,7 +17,7 @@ from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Twist
 import math
 import time
-from earendil_bot.utils.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
+from earendil_bot.gps.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
 
 
 class GpsNavTest(Node):
@@ -64,7 +64,7 @@ class GpsNavTest(Node):
         self.arrived = False      # True when robot reached the target
 
         # Publisher & Subscriber
-        # twist_mux kullanıldığı için doğrudan cmd_vel yerine cmd_vel_nav'a yayın yapıyoruz
+        # Since twist_mux is used, we publish to cmd_vel_nav instead of cmd_vel
         self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
 
@@ -103,7 +103,7 @@ class GpsNavTest(Node):
         # PHASE 1: Rotate toward target
         if not self.aligned:
             if abs(error) > self.heading_tol:
-                kp = 3.44  # 25 derece (0.436 rad) hatada tam 1.5 rad/s hıza ulaştırır
+                kp = 3.44  # P coefficient to reach 1.5 rad/s at 25 degrees (0.436 rad) error
                 angular_vel = kp * error
                 if angular_vel > 1.5: angular_vel = 1.5
                 elif angular_vel < -1.5: angular_vel = -1.5

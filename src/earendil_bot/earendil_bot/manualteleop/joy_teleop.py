@@ -50,9 +50,9 @@ class JoyTeleop(Node):
             if abs(raw_angular) < self.deadzone:
                 raw_angular = 0.0
 
-            # Eğer joystick tamamen ortadaysa (sıfır), sürekli 0 yayınlama.
-            # Sadece ilk bırakıldığında 1 kez 0 yayınla ki motorlar dursun.
-            # Yoksa otonom sürüşü (cmd_vel_nav) sonsuza kadar bloke eder!
+            # If the joystick is perfectly centered (zero), do not constantly publish 0.
+            # Only publish 0 once when released, so motors stop.
+            # Otherwise, it would block autonomous navigation (cmd_vel_nav) indefinitely!
             if raw_linear == 0.0 and raw_angular == 0.0:
                 if not self.was_zero:
                     twist.linear.x = 0.0

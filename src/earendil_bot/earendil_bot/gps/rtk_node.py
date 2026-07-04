@@ -10,7 +10,7 @@ import threading
 import time
 
 # =======================================================
-# RTCM3 PARSER YARDIMCI FONKSİYONLARI
+# RTCM3 PARSER HELPER FUNCTIONS
 # =======================================================
 def crc24q(data: bytes) -> int:
     crc = 0
@@ -52,7 +52,7 @@ def extract_rtcm3_frames(buffer: bytearray):
 # =======================================================
 def nmea2dec(coord: str, direction: str) -> float:
     if not coord:
-        raise ValueError("Boş koordinat")
+        raise ValueError("Empty coordinate")
     dot = coord.index(".")
     deg = float(coord[:dot - 2])
     mins = float(coord[dot - 2:])
@@ -89,9 +89,9 @@ def parse_gga(line: str):
 # =======================================================
 # ROS 2 NODE
 # =======================================================
-class RoverRtkNode(Node):
+class RtkNode(Node):
     def __init__(self):
-        super().__init__('rover_rtk_node')
+        super().__init__('rtk_node')
         
         self.declare_parameter('gps_port', '/dev/ttyUSB1')
         self.declare_parameter('radio_port', '/dev/ttyUSB2')
@@ -182,10 +182,10 @@ class RoverRtkNode(Node):
                     msg.status.service = NavSatStatus.SERVICE_GPS
                     self.fix_pub.publish(msg)
                     
-                    # 2 saniyede bir terminale bilgi ver (Kullanıcı için log)
+                    # Log information to terminal every 2 seconds for the user
                     now = time.time()
                     if not hasattr(self, 'last_log_time') or (now - self.last_log_time) >= 2.0:
-                        self.get_logger().info(f"[GPS] Durum: {fix_str} | Lat: {gga['lat']:.7f} | Lon: {gga['lon']:.7f} | Alt: {gga['altitude']}m")
+                        self.get_logger().info(f"[GPS] Status: {fix_str} | Lat: {gga['lat']:.7f} | Lon: {gga['lon']:.7f} | Alt: {gga['altitude']}m")
                         self.last_log_time = now
                         
             except Exception as e:
@@ -194,7 +194,7 @@ class RoverRtkNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     try:
-        node = RoverRtkNode()
+        node = RtkNode()
         rclpy.spin(node)
     except SystemExit:
         pass

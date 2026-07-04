@@ -15,22 +15,22 @@ from sensor_msgs.msg import Imu, NavSatFix
 from geometry_msgs.msg import Twist
 import math
 import time
-from earendil_bot.utils.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
+from earendil_bot.gps.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
 
 
 class GpsWaypointFollower(Node):
     def __init__(self):
         super().__init__('gps_waypoint_follower')
 
-        # Hedef koordinatlar
+        # Target coordinates
         self.declare_parameter('target_lat', 0.0)
         self.declare_parameter('target_lon', 0.0)
 
-        # Hız limitleri ve hassasiyetler
-        self.declare_parameter('heading_tolerance', 0.122)  # ~7.0 derece
-        self.declare_parameter('arrival_radius', 0.5)       # 0.5 metre (kullanıcı onayı)
-        self.declare_parameter('max_linear_x', 0.6)         # İleri max hız
-        self.declare_parameter('max_angular_z', 1.0)        # Dönüş max hızı
+        # Speed limits and tolerances
+        self.declare_parameter('heading_tolerance', 0.122)  # ~7.0 degrees
+        self.declare_parameter('arrival_radius', 0.5)       # 0.5 meters (user confirmation)
+        self.declare_parameter('max_linear_x', 0.6)         # Forward max speed
+        self.declare_parameter('max_angular_z', 1.0)        # Turning max speed
 
         self.target_lat = self.get_parameter('target_lat').value
         self.target_lon = self.get_parameter('target_lon').value
@@ -43,7 +43,7 @@ class GpsWaypointFollower(Node):
         self.get_logger().info(f"Arrival Radius: {self.arrival_radius}m")
         self.get_logger().info(f"Waiting for GPS on /gps/fix and IMU on /imu/data ...")
 
-        # Durum Değişkenleri
+        # State Variables
         self.current_lat = None
         self.current_lon = None
         self.imu_heading = None
@@ -51,13 +51,13 @@ class GpsWaypointFollower(Node):
         self.last_imu_time = 0.0
         self.last_gps_time = 0.0
         
-        self.aligned = False      # Araç hedefe döndü mü?
-        self.arrived = False      # Araç hedefe vardı mı?
+        self.aligned = False      # Is the vehicle aligned to target?
+        self.arrived = False      # Has the vehicle arrived at target?
 
         # Publisher & Subscriber
-        # Motor bridge cmd_vel dinliyor, twist_mux varsa cmd_vel_nav.
-        # Biz doğrudan cmd_vel_nav yayınlayalım, eğer çalışmazsa cmd_vel eklenebilir.
-        # Varsayılan olarak twist_mux kullanıldığı belirtilmişti
+        # Motor bridge listens to cmd_vel, if twist_mux is present it's cmd_vel_nav.
+        # We publish to cmd_vel_nav directly, if not working it can be changed to cmd_vel.
+        # It was specified that twist_mux is used by default.
         self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
@@ -84,46 +84,46 @@ class GpsWaypointFollower(Node):
             return
 
         if self.target_lat == 0.0 and self.target_lon == 0.0:
-            self.get_logger().warn("Hedef koordinat girilmedi! (0.0, 0.0). Bekleniyor...", throttle_duration_sec=3.0)
+            self.get_logger().warn("Target coordinates not entered! (0.0, 0.0). Waiting...", throttle_duration_sec=3.0)
             return
 
         if self.imu_heading is None or (time.time() - self.last_imu_time > 1.5):
-            self.get_logger().warn("IMU verisi bekleniyor veya koptu!", throttle_duration_sec=2.0)
+            self.get_logger().warn("Waiting for IMU data or connection lost!", throttle_duration_sec=2.0)
             self.stop_robot(cmd)
             return
 
         if self.current_lat is None or (time.time() - self.last_gps_time > 2.0):
-            self.get_logger().warn("GPS verisi bekleniyor veya koptu!", throttle_duration_sec=2.0)
+            self.get_logger().warn("Waiting for GPS data or connection lost!", throttle_duration_sec=2.0)
             self.stop_robot(cmd)
             return
 
-        # Anlık Hedef Açı ve Mesafe Hesabı
+        # Current Target Bearing and Distance Calculation
         target_bearing = bearing_between_gps_rad(self.current_lat, self.current_lon, self.target_lat, self.target_lon)
         distance = haversine(self.current_lat, self.current_lon, self.target_lat, self.target_lon)
 
-        # Hedefe Ulaşma Kontrolü
+        # Target Arrival Check
         if distance <= self.arrival_radius:
             self.arrived = True
-            self.get_logger().info(f"HEDEFE ULAŞILDI! Hedefe uzaklık: {distance:.2f}m")
+            self.get_logger().info(f"TARGET REACHED! Distance to target: {distance:.2f}m")
             self.stop_robot(cmd)
             return
 
-        # Heading Hatası (Radyan)
+        # Heading Error (Radians)
         error = angle_error_rad(target_bearing, self.imu_heading)
 
         self.get_logger().info(
-            f"Mesafe: {distance:.1f}m | "
-            f"Açı Hatası: {math.degrees(error):.1f}° | "
-            f"Durum: {'SÜRÜŞ' if self.aligned else 'DÖNÜŞ'}", throttle_duration_sec=1.0)
+            f"Distance: {distance:.1f}m | "
+            f"Angle Error: {math.degrees(error):.1f}° | "
+            f"State: {'DRIVING' if self.aligned else 'ROTATING'}", throttle_duration_sec=1.0)
 
-        # AŞAMA 1: Hedefe Dönüş (Rotate phase)
+        # PHASE 1: Rotate to Target (Rotate phase)
         if not self.aligned:
             if abs(error) > self.heading_tol:
-                # Sadece olduğu yerde dön (PID mantığı: error ile orantılı)
+                # Rotate in place (PID logic: proportional to error)
                 kp_angular = 2.5
                 angular_vel = kp_angular * error
                 
-                # Sınırlandırma
+                # Limit
                 if angular_vel > self.max_angular_z: angular_vel = self.max_angular_z
                 elif angular_vel < -self.max_angular_z: angular_vel = -self.max_angular_z
                 
@@ -131,22 +131,22 @@ class GpsWaypointFollower(Node):
                 cmd.linear.x = 0.0
             else:
                 self.aligned = True
-                self.get_logger().info("Açı hizalandı! Sürüş aşamasına geçiliyor.")
+                self.get_logger().info("Angle aligned! Switching to driving phase.")
 
-        # AŞAMA 2: İleri Sürüş (Drive phase)
+        # PHASE 2: Drive Forward (Drive phase)
         if self.aligned:
-            # Çok fazla sapma varsa tekrar sadece dönüş aşamasına dön (3 katı tolerans)
+            # If deviation is too large, go back to rotation phase (3x tolerance)
             if abs(error) > self.heading_tol * 3:
                 self.aligned = False
-                self.get_logger().info("Hizalanma bozuldu! Yeniden hizalanıyor...")
+                self.get_logger().info("Alignment lost! Re-aligning...")
                 cmd.linear.x = 0.0
-                cmd.angular.z = 0.0  # Bir sonraki döngüde hesaplanacak
+                cmd.angular.z = 0.0  # Will be calculated in the next loop
             else:
-                # İleri sürerken küçük düzeltmeler yap
+                # Make small corrections while driving forward
                 cmd.linear.x = self.max_linear_x
-                cmd.angular.z = 1.5 * error  # Yolda tutma Kp'si
+                cmd.angular.z = 1.5 * error  # Lane keeping Kp
                 
-                # Z sınırlandırma (Gerekirse)
+                # Z limit (If needed)
                 if cmd.angular.z > self.max_angular_z: cmd.angular.z = self.max_angular_z
                 elif cmd.angular.z < -self.max_angular_z: cmd.angular.z = -self.max_angular_z
 

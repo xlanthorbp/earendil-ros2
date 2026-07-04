@@ -17,7 +17,7 @@ from std_msgs.msg import Float32
 from geometry_msgs.msg import Twist
 import math
 import time
-from earendil_bot.utils.gps_math import bearing_between_gps_deg, haversine, angle_error_deg
+from earendil_bot.gps.gps_math import bearing_between_gps_deg, haversine, angle_error_deg
 
 
 class MagTurnTest(Node):
@@ -52,11 +52,11 @@ class MagTurnTest(Node):
             robot_lat, robot_lon, base_lat, base_lon)
 
         self.get_logger().info(f"Robot  : ({robot_lat:.6f}, {robot_lon:.6f})")
-        self.get_logger().info(f"Hedef  : ({base_lat:.6f}, {base_lon:.6f})")
-        self.get_logger().info(f"Mesafe : {distance:.1f} m")
-        self.get_logger().info(f"Hedef Bearing : {self.target_bearing:.1f}°")
-        self.get_logger().info(f"Tolerans      : {self.tolerance:.1f}°")
-        self.get_logger().info("Manyetometre verisini bekliyorum (/mag/heading) ...")
+        self.get_logger().info(f"Target : ({base_lat:.6f}, {base_lon:.6f})")
+        self.get_logger().info(f"Distance : {distance:.1f} m")
+        self.get_logger().info(f"Target Bearing : {self.target_bearing:.1f}°")
+        self.get_logger().info(f"Tolerance      : {self.tolerance:.1f}°")
+        self.get_logger().info("Waiting for magnetometer data (/mag/heading) ...")
 
         # State
         self.current_heading = None
@@ -64,7 +64,7 @@ class MagTurnTest(Node):
         self.aligned = False
 
         # Publisher & Subscriber
-        # twist_mux kullanıldığı için doğrudan cmd_vel yerine cmd_vel_nav'a yayın yapıyoruz
+        # Since twist_mux is used, we publish to cmd_vel_nav instead of cmd_vel
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.create_subscription(
             Float32, '/mag/heading', self.heading_cb, 10)
@@ -95,17 +95,17 @@ class MagTurnTest(Node):
         error = angle_error_deg(self.target_bearing, self.current_heading)
 
         self.get_logger().info(
-            f"Mevcut: {self.current_heading:.1f}° | "
-            f"Hedef: {self.target_bearing:.1f}° | "
-            f"Hata: {error:.1f}°")
+            f"Current: {self.current_heading:.1f}° | "
+            f"Target: {self.target_bearing:.1f}° | "
+            f"Error: {error:.1f}°")
 
         if abs(error) > self.tolerance:
             # P-Controller logic
-            # Hata 25 dereceyken hızı 1.5 rad/s (yani 90 PWM) yapacak P katsayısı: 1.5 / 25 = 0.06
+            # P coefficient to reach 1.5 rad/s (90 PWM) at 25 degrees error: 1.5 / 25 = 0.06
             kp = 0.06
             angular_vel = kp * error
             
-            # Dönüş hızı çok yüksekse limitle (ROS Parametresinden gelir, varsayılan 0.5)
+            # Limit turn speed if too high (From ROS Parameter, default 0.5)
             if angular_vel > self.turn_speed: angular_vel = self.turn_speed
             elif angular_vel < -self.turn_speed: angular_vel = -self.turn_speed
             
@@ -116,8 +116,8 @@ class MagTurnTest(Node):
             cmd.angular.z = 0.0
             cmd.linear.x = 0.0
             self.get_logger().info(
-                f"HEDEFE ULASILDI! Mevcut: {self.current_heading:.1f}° ≈ "
-                f"Hedef: {self.target_bearing:.1f}°")
+                f"TARGET REACHED! Current: {self.current_heading:.1f}° ≈ "
+                f"Target: {self.target_bearing:.1f}°")
 
         if self.invert_turn:
             cmd.angular.z = -cmd.angular.z

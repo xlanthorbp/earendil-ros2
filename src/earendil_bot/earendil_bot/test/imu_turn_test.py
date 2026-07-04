@@ -17,7 +17,7 @@ from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Twist
 import math
 import time
-from earendil_bot.utils.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
+from earendil_bot.gps.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
 
 
 class ImuTurnTest(Node):

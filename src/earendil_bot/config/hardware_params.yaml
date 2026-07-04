@@ -1,0 +1,20 @@
+# hardware_params.yaml
+# Hardware configurations for Earendil Bot (Encoder, IMU, Magnetometer, Motor)
+
+hardware_bridge:
+  ros__parameters:
+    # Serial Port Settings
+    port: "/dev/ttyUSB1"
+    baudrate: 115200
+
+    # Kinematics (For Odometry)
+    wheel_radius: 0.033           # meters (3.3 cm radius -> 6.6 cm diameter)
+    wheel_separation: 0.160       # meters (16 cm distance between left and right wheels)
+    ticks_per_rev: 341.2          # Encoder ticks per 1 full wheel revolution (Adjust for your specific motor gear ratio)
+    
+    # Magnetometer (Yaw Offset)
+    heading_offset: 0.0           # degrees (Used to align magnetic north with robot's forward direction if needed)
+
+    # Motor PWM Limits
+    min_pwm: 60
+    max_pwm: 255

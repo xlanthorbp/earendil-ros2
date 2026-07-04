@@ -9,9 +9,9 @@ def normalize_heading_deg(angle: float) -> float:
 
 def angle_error_deg(target_deg: float, current_deg: float) -> float:
     """
-    Sonuç -180 ile +180 arasındadır.
-    Pozitif hata: sağa dön
-    Negatif hata: sola dön
+    Result is between -180 and +180.
+    Positive error: turn right
+    Negative error: turn left
     """
     error = target_deg - current_deg
 
@@ -24,14 +24,14 @@ def angle_error_deg(target_deg: float, current_deg: float) -> float:
 
 def angle_error_rad(target_rad: float, current_rad: float) -> float:
     """
-    Sonuç -PI ile +PI arasındadır.
+    Result is between -PI and +PI.
     """
     error = target_rad - current_rad
     return (error + math.pi) % (2 * math.pi) - math.pi
 
 def bearing_between_gps_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
-    İki GPS noktası arasındaki hedef yön açısını (derece cinsinden) hesaplar.
+    Calculates the target bearing (in degrees) between two GPS points.
     """
     lat1_rad = math.radians(lat1)
     lat2_rad = math.radians(lat2)
@@ -48,13 +48,13 @@ def bearing_between_gps_deg(lat1: float, lon1: float, lat2: float, lon2: float) 
 
 def bearing_between_gps_rad(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
-    İki GPS noktası arasındaki hedef yön açısını (radyan cinsinden) hesaplar.
+    Calculates the target bearing (in radians) between two GPS points.
     """
     return math.radians(bearing_between_gps_deg(lat1, lon1, lat2, lon2))
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
-    İki GPS noktası arasındaki mesafeyi metre cinsinden hesaplar.
+    Calculates the distance in meters between two GPS points.
     """
     R = 6371000.0  # Earth radius in meters
     p1, p2 = math.radians(lat1), math.radians(lat2)
