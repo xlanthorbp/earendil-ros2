@@ -46,6 +46,7 @@ setup(
             'igloo_exit = earendil_bot.test.igloo_exit:main',
             'ir_bridge = earendil_bot.bridge.ir_bridge:main',
             'aruco_detector = earendil_bot.test.aruco_detector:main',
+            'hardware_check = earendil_bot.hardware_check:main',
         ],
     },
 )

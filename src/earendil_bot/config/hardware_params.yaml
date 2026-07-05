@@ -18,3 +18,22 @@ hardware_bridge:
     # Motor PWM Limits
     min_pwm: 60
     max_pwm: 255
+
+ir_bridge:
+  ros__parameters:
+    port: "/dev/ttyUSB0"
+    baud: 115200
+
+# RTK GPS Node Configuration
+rtk_node:
+  ros__parameters:
+    gps_port: "/dev/ttyUSB2"
+    radio_port: "/dev/ttyUSB3"
+    gps_baud: 460800
+    radio_baud: 57600
+
+# 2D Lidar Node Configuration
+STL27L:
+  ros__parameters:
+    port_name: "/dev/ttyUSB4"
+    port_baudrate: 921600
