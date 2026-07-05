@@ -18,10 +18,6 @@ setup(
 
         (os.path.join('share', package_name, 'config'), [
             'config/twist_mux.yaml',
-            'config/nav2_params.yaml',
-            'config/ukf_local.yaml',
-            'config/ukf_global.yaml',
-            'config/navsat.yaml',
             'config/controllers.yaml',
             'config/test_params.yaml',
             'config/tunnel_params.yaml',
@@ -42,18 +38,14 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'arduino_joy = earendil_bot.manualteleop.arduino_joy:main',
-            'joy_teleop = earendil_bot.manualteleop.joy_teleop:main',
-            'gps_nav_test = earendil_bot.test.gps_nav_test:main',
-            'imu_turn_test = earendil_bot.test.imu_turn_test:main',
-            'mag_turn_test = earendil_bot.test.mag_turn_test:main',
+            'turn_test = earendil_bot.test.turn_test:main',
             'hardware_bridge = earendil_bot.bridge.hardware_bridge:main',
-            'rtk_node = earendil_bot.gps.rtk_node:main',
             'gy91_imu_node = earendil_bot.imu.gy91_imu_node:main',
-            'gps_waypoint_follower = earendil_bot.test.gps_waypoint_follower:main',
+            'gps_nav_test = earendil_bot.test.gps_nav_test:main',
             'tunnel_navigator = earendil_bot.test.tunnel_navigator:main',
             'igloo_exit = earendil_bot.test.igloo_exit:main',
             'ir_bridge = earendil_bot.bridge.ir_bridge:main',
+            'aruco_detector = earendil_bot.test.aruco_detector:main',
         ],
     },
 )

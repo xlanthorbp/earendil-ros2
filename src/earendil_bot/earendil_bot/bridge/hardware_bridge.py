@@ -68,6 +68,10 @@ class HardwareBridgeNode(Node):
         self.y = 0.0
         self.theta = 0.0
 
+        # IMU state for merging
+        self.latest_yaw = 0.0
+        self.has_mag_data = False
+
         # ---------------------------------------------------------
         # Serial Connection
         # ---------------------------------------------------------
@@ -333,15 +337,9 @@ class HardwareBridgeNode(Node):
             h_msg.data = heading_deg
             self.mag_pub.publish(h_msg)
 
-            # Publish as Imu message (quaternion)
-            yaw = math.radians(heading_deg)
-            imu_msg = Imu()
-            imu_msg.header.stamp = self.get_clock().now().to_msg()
-            imu_msg.header.frame_id = 'imu_link'
-            imu_msg.orientation.z = math.sin(yaw / 2.0)
-            imu_msg.orientation.w = math.cos(yaw / 2.0)
-            
-            self.imu_pub.publish(imu_msg)
+            # Save latest yaw for IMU merging
+            self.latest_yaw = math.radians(heading_deg)
+            self.has_mag_data = True
 
         except (ValueError, IndexError):
             pass
@@ -370,6 +368,26 @@ class HardwareBridgeNode(Node):
             imu_msg.linear_acceleration.y = float(parts[5])
             imu_msg.linear_acceleration.z = float(parts[6])
             
+            # Add Covariances
+            imu_msg.angular_velocity_covariance[0] = 0.001
+            imu_msg.angular_velocity_covariance[4] = 0.001
+            imu_msg.angular_velocity_covariance[8] = 0.001
+            
+            imu_msg.linear_acceleration_covariance[0] = 0.01
+            imu_msg.linear_acceleration_covariance[4] = 0.01
+            imu_msg.linear_acceleration_covariance[8] = 0.01
+
+            # Fill Orientation if MAG is available
+            if self.has_mag_data:
+                imu_msg.orientation.z = math.sin(self.latest_yaw / 2.0)
+                imu_msg.orientation.w = math.cos(self.latest_yaw / 2.0)
+                imu_msg.orientation_covariance[0] = 0.01
+                imu_msg.orientation_covariance[4] = 0.01
+                imu_msg.orientation_covariance[8] = 0.01
+            else:
+                imu_msg.orientation_covariance[0] = -1.0
+            
+            self.imu_pub.publish(imu_msg)
             self.imu_raw_pub.publish(imu_msg)
             
         except (ValueError, IndexError):

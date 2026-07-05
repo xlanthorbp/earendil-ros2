@@ -31,6 +31,8 @@ class GpsWaypointFollower(Node):
         self.declare_parameter('arrival_radius', 0.5)       # 0.5 meters (user confirmation)
         self.declare_parameter('max_linear_x', 0.6)         # Forward max speed
         self.declare_parameter('max_angular_z', 1.0)        # Turning max speed
+        self.declare_parameter('invert_turn', False)
+        self.declare_parameter('dry_run', False)
 
         self.target_lat = self.get_parameter('target_lat').value
         self.target_lon = self.get_parameter('target_lon').value
@@ -38,6 +40,8 @@ class GpsWaypointFollower(Node):
         self.arrival_radius = self.get_parameter('arrival_radius').value
         self.max_linear_x = self.get_parameter('max_linear_x').value
         self.max_angular_z = self.get_parameter('max_angular_z').value
+        self.invert_turn = self.get_parameter('invert_turn').value
+        self.dry_run = self.get_parameter('dry_run').value
 
         self.get_logger().info(f"Target Waypoint: ({self.target_lat:.6f}, {self.target_lon:.6f})")
         self.get_logger().info(f"Arrival Radius: {self.arrival_radius}m")
@@ -149,6 +153,13 @@ class GpsWaypointFollower(Node):
                 # Z limit (If needed)
                 if cmd.angular.z > self.max_angular_z: cmd.angular.z = self.max_angular_z
                 elif cmd.angular.z < -self.max_angular_z: cmd.angular.z = -self.max_angular_z
+
+        if self.invert_turn:
+            cmd.angular.z = -cmd.angular.z
+
+        if self.dry_run:
+            cmd.angular.z = 0.0
+            cmd.linear.x = 0.0
 
         self.pub.publish(cmd)
 

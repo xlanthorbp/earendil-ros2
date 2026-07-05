@@ -33,6 +33,7 @@ class ImuTurnTest(Node):
         self.declare_parameter('base_lon', 0.0)
 
         self.declare_parameter('heading_tolerance', 0.15)  # ~8.5 degrees
+        self.declare_parameter('turn_speed', 0.5)          # rad/s
         self.declare_parameter('invert_turn', False)
         self.declare_parameter('dry_run', False)
 
@@ -41,6 +42,7 @@ class ImuTurnTest(Node):
         base_lat = self.get_parameter('base_lat').value
         base_lon = self.get_parameter('base_lon').value
         self.heading_tol = self.get_parameter('heading_tolerance').value
+        self.turn_speed = self.get_parameter('turn_speed').value
         self.invert_turn = self.get_parameter('invert_turn').value
         self.dry_run = self.get_parameter('dry_run').value
 
@@ -94,8 +96,8 @@ class ImuTurnTest(Node):
             # P-Controller logic
             kp = 2.0
             angular_vel = kp * error
-            if angular_vel > 0.5: angular_vel = 0.5
-            elif angular_vel < -0.5: angular_vel = -0.5
+            if angular_vel > self.turn_speed: angular_vel = self.turn_speed
+            elif angular_vel < -self.turn_speed: angular_vel = -self.turn_speed
             cmd.angular.z = angular_vel
         else:
             self.get_logger().info("ALIGNED WITH BASE!")
