@@ -21,19 +21,19 @@ hardware_bridge:
 
 ir_bridge:
   ros__parameters:
-    port: "/dev/ttyUSB0"
+    port: "/dev/ttyUSBx"
     baud: 115200
 
 # RTK GPS Node Configuration
 rtk_node:
   ros__parameters:
-    gps_port: "/dev/ttyUSB2"
-    radio_port: "/dev/ttyUSB3"
+    gps_port: "/dev/ttyUSBx"
+    radio_port: "/dev/ttyUSBx"
     gps_baud: 460800
     radio_baud: 57600
 
 # 2D Lidar Node Configuration
 STL27L:
   ros__parameters:
-    port_name: "/dev/ttyUSB4"
+    port_name: "/dev/ttyUSB0"
     port_baudrate: 921600
