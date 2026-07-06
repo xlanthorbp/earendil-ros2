@@ -40,7 +40,6 @@ setup(
         'console_scripts': [
             'turn_test = earendil_bot.test.turn_test:main',
             'hardware_bridge = earendil_bot.bridge.hardware_bridge:main',
-            'gy91_imu_node = earendil_bot.imu.gy91_imu_node:main',
             'gps_nav_test = earendil_bot.test.gps_nav_test:main',
             'tunnel_navigator = earendil_bot.test.tunnel_navigator:main',
             'igloo_exit = earendil_bot.test.igloo_exit:main',

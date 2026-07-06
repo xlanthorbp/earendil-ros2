@@ -1,385 +1,920 @@
-#include <Servo.h>
 #include <Wire.h>
+#include <Servo.h>
 #include <math.h>
 
-  // === Motor Sürücü Pinleri ===
-  const int L_RPWM = 5,  L_LPWM = 6,  L_REN = 7,  L_LEN = 8;
-  const int R_RPWM = 9,  R_LPWM = 10, R_REN = 11, R_LEN = 12;
-  const int M3_RPWM = 4, M3_LPWM = 13, M3_REN = 45, M3_LEN = 52;
+// =======================================================
+// ARC'26 Rover Arduino Mega ROS2 Bridge Firmware
+// =======================================================
+// Raspberry Pi ROS2 tarafı bu formatı bekler:
+//
+// Telemetry:
+// MAG,time_ms,heading,rawX,rawY,rawZ,calX,calY,calZ,plane,offset,motor_mode,pwm
+//
+// Motor commands:
+// MOTOR:STOP
+// MOTOR:FWD:<pwm>
+// MOTOR:BACK:<pwm>
+// MOTOR:LEFT:<pwm>
+// MOTOR:RIGHT:<pwm>
+//
+// Config commands:
+// TELEM:ON
+// TELEM:OFF
+// PLANE:XY
+// PLANE:XZ
+// PLANE:YZ
+// OFFSET:<deg>
+// HEADING
+// STATUS
+// PING
+// =======================================================
 
-  // === PWM Kademeleri ===
-  #define PWM_YAVAS 80
-  #define PWM_HIZLI 200
-  const int DRILL_PWM = 200;
 
-  // === Servo Nesneleri ===
-  Servo servo1;
-  Servo servo2;
-  Servo servo3;
-  Servo servo4;
-  Servo servo5;
+// =======================================================
+// GY-271 ADRESLERİ
+// =======================================================
+#define QMC5883_ADDR 0x0D
+#define HMC5883_ADDR 0x1E
 
-  const int SERVO_PIN1 = 22;
-  const int SERVO_PIN2 = 24;
-  const int SERVO_PIN3 = 26;
-  const int SERVO_PIN4 = 28;
-  const int SERVO_PIN5 = 44;
+#define SERIAL_BAUD 115200
 
-  // === Servo1/2 çok turlu ayarlari ===
-  const int SAFE_MIN             = 40;
-  const int SAFE_MAX             = 140;
-  const int SAFE_MAX1_SECOND     = 45;
+// Telemetry frekansı
+// 100 ms -> yaklaşık 10 Hz
+#define TELEMETRY_INTERVAL_MS 100
 
-  const int TUR_MS               = 400;
-  const int TUR_PWM_YUKARI       = 180;
-  const int TUR_PWM_ASAGI        = 0;
-  const int SONRAKI_YUK_PWM1     = 46;
-  const int SONRAKI_ASG_PWM1     = 134;
-  const int SONRAKI_YUK_PWM2     = 46;
-  const int SONRAKI_ASG_PWM2     = 134;
-  const int MAX_TUR              = 2;
+// Magnetometer ortalama sayısı
+// Çok yüksek yaparsan telemetry yavaşlar.
+#define SAMPLE_COUNT 8
+#define SAMPLE_DELAY_MS 2
 
-  // === Baslangic ===
-  int pwm1 = 45, pwm2 = 90;
-  int turSayisi1 = 2, turSayisi2 = 2;
-  int pwm3 = 90, pwm4 = 180;
-  int pwm5 = 90;
+// Motor watchdog
+// Raspberry'den komut kesilirse motor durur.
+#define MOTOR_WATCHDOG_MS 700
 
-  // === Esikler ===
-  const int JOY_CENTER = 2048;
-  const int DEADZONE   = 400;
-  const int STEP       = 2;
 
-  // ===================================================================
-  // IMU SECTION (GY-91 MPU + GY-271 Magnetometer)
-  // ===================================================================
-  #define MPU_ADDR 0x68
-  #define QMC5883_ADDR 0x0D
-  #define HMC5883_ADDR 0x1E
+// =======================================================
+// GY-271 KALİBRASYON DEĞERLERİ
+// Senin son kullandığın değerler.
+// =======================================================
+#define MAG_X_OFFSET -356.50
+#define MAG_Y_OFFSET -134.00
+#define MAG_Z_OFFSET 55.00
 
-  #define IMU_SEND_INTERVAL_MS 50   // Send IMU data every 50ms (20 Hz)
+#define MAG_X_SCALE 1.05697
+#define MAG_Y_SCALE 0.93964
+#define MAG_Z_SCALE 1.05844
 
-  enum MagType { MAG_NONE, MAG_QMC5883L, MAG_HMC5883L };
-  MagType magType = MAG_NONE;
-  bool mpuReady = false;
 
-  // Mag calibration offsets (update after calibration)
-  float MAG_X_OFFSET = 0;
-  float MAG_Y_OFFSET = 0;
+// =======================================================
+// HEADING AYARLARI
+// =======================================================
+// 0 = XY, 1 = XZ, 2 = YZ
+#define HEADING_PLANE_DEFAULT 0
 
-  unsigned long lastImuSendTime = 0;
+// Son pratik offset.
+// Raspberry arduino_bridge_node zaten OFFSET:-53.5 gönderebilir.
+// Burada default da -53.5 yapıldı.
+#define HEADING_OFFSET_DEFAULT -53.5
 
-  // --- I2C helpers ---
-  bool i2cExists(uint8_t addr) {
-    Wire.beginTransmission(addr);
-    return Wire.endTransmission() == 0;
+
+// =======================================================
+// MOTOR SÜRÜCÜ PİNLERİ
+// =======================================================
+const int L_RPWM = 5;
+const int L_LPWM = 6;
+const int L_REN  = 7;
+const int L_LEN  = 8;
+
+const int R_RPWM = 9;
+const int R_LPWM = 10;
+const int R_REN  = 11;
+const int R_LEN  = 12;
+
+// Sondaj / 3. motor
+const int M3_RPWM = 4;
+const int M3_LPWM = 13;
+const int M3_REN  = 45;
+const int M3_LEN  = 52;
+
+// Eğer sende sondaj LEN pini 46 ise üstteki 52'yi 46 yap.
+
+
+// =======================================================
+// PWM AYARLARI
+// =======================================================
+#define PWM_YAVAS 80
+#define PWM_HIZLI 200
+const int DRILL_PWM = 200;
+
+
+// =======================================================
+// SERVO NESNELERİ
+// Eski sistemdeki servo yapısı korunuyor.
+// =======================================================
+Servo servo1;
+Servo servo2;
+Servo servo3;
+Servo servo4;
+Servo servo5;
+
+const int SERVO_PIN1 = 22;
+const int SERVO_PIN2 = 24;
+const int SERVO_PIN3 = 26;
+const int SERVO_PIN4 = 28;
+const int SERVO_PIN5 = 44;
+
+int pwm1 = 45;
+int pwm2 = 90;
+int pwm3 = 90;
+int pwm4 = 180;
+int pwm5 = 90;
+
+const int JOY_CENTER = 2048;
+const int DEADZONE   = 400;
+const int STEP       = 2;
+
+
+// =======================================================
+// MAGNETOMETER STATE
+// =======================================================
+enum MagType {
+  MAG_NONE,
+  MAG_QMC5883L,
+  MAG_HMC5883L
+};
+
+MagType magType = MAG_NONE;
+
+
+// =======================================================
+// SYSTEM STATE
+// =======================================================
+uint8_t activeHeadingPlane = HEADING_PLANE_DEFAULT;
+float headingOffsetDeg = HEADING_OFFSET_DEFAULT;
+
+bool telemetryEnabled = true;
+
+unsigned long lastTelemetryMs = 0;
+unsigned long lastMotorCommandMs = 0;
+
+String motorMode = "STOP";
+int currentMotorPwm = 0;
+
+
+// =======================================================
+// GENEL YARDIMCI FONKSİYONLAR
+// =======================================================
+float normalizeHeading(float h) {
+  while (h >= 360.0) h -= 360.0;
+  while (h < 0.0) h += 360.0;
+  return h;
+}
+
+float angleErrorDeg(float target, float current) {
+  float e = target - current;
+
+  while (e > 180.0) e -= 360.0;
+  while (e < -180.0) e += 360.0;
+
+  return e;
+}
+
+String planeName(uint8_t p) {
+  if (p == 0) return "XY";
+  if (p == 1) return "XZ";
+  return "YZ";
+}
+
+String magName() {
+  if (magType == MAG_QMC5883L) return "QMC5883L";
+  if (magType == MAG_HMC5883L) return "HMC5883L";
+  return "NONE";
+}
+
+int parsePwmValue(String s) {
+  s.trim();
+  int pwm = s.toInt();
+  pwm = constrain(pwm, 0, 255);
+  return pwm;
+}
+
+
+// =======================================================
+// I2C / GY-271 FONKSİYONLARI
+// =======================================================
+bool i2cExists(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  return Wire.endTransmission() == 0;
+}
+
+void write8(uint8_t addr, uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
+}
+
+uint8_t readBytes(uint8_t addr, uint8_t reg, uint8_t count, uint8_t *dest) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+
+  if (Wire.endTransmission(false) != 0) {
+    return 0;
   }
 
-  void imuWrite8(uint8_t addr, uint8_t reg, uint8_t val) {
-    Wire.beginTransmission(addr);
-    Wire.write(reg);
-    Wire.write(val);
-    Wire.endTransmission();
+  Wire.requestFrom(addr, count);
+
+  uint8_t i = 0;
+  while (Wire.available() && i < count) {
+    dest[i++] = Wire.read();
   }
 
-  void imuReadBytes(uint8_t addr, uint8_t reg, uint8_t count, uint8_t *dest) {
-    Wire.beginTransmission(addr);
-    Wire.write(reg);
-    Wire.endTransmission(false);
-    Wire.requestFrom(addr, count);
-    uint8_t i = 0;
-    while (Wire.available() && i < count) {
-      dest[i++] = Wire.read();
+  return i;
+}
+
+bool initMagnetometer() {
+  if (i2cExists(QMC5883_ADDR)) {
+    magType = MAG_QMC5883L;
+
+    Serial.println("GY-271 bulundu: QMC5883L, adres 0x0D");
+
+    // QMC5883L:
+    // 0x0B: Set/Reset period
+    // 0x09: OSR=512, RNG=8G, ODR=200Hz, continuous
+    write8(QMC5883_ADDR, 0x0B, 0x01);
+    write8(QMC5883_ADDR, 0x09, 0x1D);
+
+    return true;
+  }
+
+  if (i2cExists(HMC5883_ADDR)) {
+    magType = MAG_HMC5883L;
+
+    Serial.println("GY-271 bulundu: HMC5883L, adres 0x1E");
+
+    write8(HMC5883_ADDR, 0x00, 0x70);
+    write8(HMC5883_ADDR, 0x01, 0x20);
+    write8(HMC5883_ADDR, 0x02, 0x00);
+
+    return true;
+  }
+
+  Serial.println("GY-271 bulunamadi.");
+  magType = MAG_NONE;
+  return false;
+}
+
+bool readRawMagnetometer(int16_t &rawX, int16_t &rawY, int16_t &rawZ) {
+  if (magType == MAG_NONE) return false;
+
+  if (magType == MAG_QMC5883L) {
+    uint8_t b[6] = {0};
+
+    if (readBytes(QMC5883_ADDR, 0x00, 6, b) < 6) {
+      return false;
     }
+
+    rawX = ((int16_t)b[1] << 8) | b[0];
+    rawY = ((int16_t)b[3] << 8) | b[2];
+    rawZ = ((int16_t)b[5] << 8) | b[4];
+
+    return true;
   }
 
-  // --- MPU init ---
-  void initMPU() {
-    if (!i2cExists(MPU_ADDR)) { return; }
-    imuWrite8(MPU_ADDR, 0x6B, 0x00); // Wake up
-    delay(100);
-    imuWrite8(MPU_ADDR, 0x1A, 0x03); // DLPF
-    imuWrite8(MPU_ADDR, 0x1B, 0x00); // Gyro ±250 dps
-    imuWrite8(MPU_ADDR, 0x1C, 0x00); // Accel ±2g
-    mpuReady = true;
-  }
+  if (magType == MAG_HMC5883L) {
+    uint8_t b[6] = {0};
 
-  // --- Magnetometer init ---
-  void initMag() {
-    if (i2cExists(QMC5883_ADDR)) {
-      magType = MAG_QMC5883L;
-      imuWrite8(QMC5883_ADDR, 0x0B, 0x01);
-      imuWrite8(QMC5883_ADDR, 0x09, 0x1D);
-    } else if (i2cExists(HMC5883_ADDR)) {
-      magType = MAG_HMC5883L;
-      imuWrite8(HMC5883_ADDR, 0x00, 0x70);
-      imuWrite8(HMC5883_ADDR, 0x01, 0x20);
-      imuWrite8(HMC5883_ADDR, 0x02, 0x00);
-    }
-  }
-
-  // --- Read and send IMU data ---
-  // Format: IMU,heading,ax,ay,az,gx,gy,gz\n
-  void sendImuData() {
-    float ax = 0, ay = 0, az = 0;
-    float gx = 0, gy = 0, gz = 0;
-    float heading = -1;
-
-    // Read MPU (accel + gyro)
-    if (mpuReady) {
-      uint8_t b[14];
-      imuReadBytes(MPU_ADDR, 0x3B, 14, b);
-      int16_t rax = ((int16_t)b[0] << 8) | b[1];
-      int16_t ray = ((int16_t)b[2] << 8) | b[3];
-      int16_t raz = ((int16_t)b[4] << 8) | b[5];
-      int16_t rgx = ((int16_t)b[8] << 8) | b[9];
-      int16_t rgy = ((int16_t)b[10] << 8) | b[11];
-      int16_t rgz = ((int16_t)b[12] << 8) | b[13];
-      ax = rax / 16384.0;
-      ay = ray / 16384.0;
-      az = raz / 16384.0;
-      gx = rgx / 131.0;
-      gy = rgy / 131.0;
-      gz = rgz / 131.0;
+    if (readBytes(HMC5883_ADDR, 0x03, 6, b) < 6) {
+      return false;
     }
 
-    // Read Magnetometer (heading)
-    if (magType == MAG_QMC5883L) {
-      uint8_t b[6];
-      imuReadBytes(QMC5883_ADDR, 0x00, 6, b);
-      float mx = (float)(((int16_t)b[1] << 8) | b[0]) - MAG_X_OFFSET;
-      float my = (float)(((int16_t)b[3] << 8) | b[2]) - MAG_Y_OFFSET;
-      heading = atan2(my, mx) * 180.0 / PI;
-      if (heading < 0) heading += 360.0;
-    } else if (magType == MAG_HMC5883L) {
-      uint8_t b[6];
-      imuReadBytes(HMC5883_ADDR, 0x03, 6, b);
-      float mx = (float)(((int16_t)b[0] << 8) | b[1]) - MAG_X_OFFSET;
-      float my = (float)(((int16_t)b[4] << 8) | b[5]) - MAG_Y_OFFSET;
-      heading = atan2(my, mx) * 180.0 / PI;
-      if (heading < 0) heading += 360.0;
+    rawX = ((int16_t)b[0] << 8) | b[1];
+    rawZ = ((int16_t)b[2] << 8) | b[3];
+    rawY = ((int16_t)b[4] << 8) | b[5];
+
+    return true;
+  }
+
+  return false;
+}
+
+bool readCalibrated(
+  float &rawXAvg,
+  float &rawYAvg,
+  float &rawZAvg,
+  float &calX,
+  float &calY,
+  float &calZ
+) {
+  long sx = 0;
+  long sy = 0;
+  long sz = 0;
+  int count = 0;
+
+  for (int i = 0; i < SAMPLE_COUNT; i++) {
+    int16_t x, y, z;
+
+    if (readRawMagnetometer(x, y, z)) {
+      sx += x;
+      sy += y;
+      sz += z;
+      count++;
     }
 
-    // Send as CSV: IMU,heading,ax,ay,az,gx,gy,gz
-    Serial.print("IMU,");
-    Serial.print(heading, 2);
-    Serial.print(",");
-    Serial.print(ax, 4); Serial.print(",");
-    Serial.print(ay, 4); Serial.print(",");
-    Serial.print(az, 4); Serial.print(",");
-    Serial.print(gx, 2); Serial.print(",");
-    Serial.print(gy, 2); Serial.print(",");
-    Serial.print(gz, 2);
-    Serial.println();
+    delay(SAMPLE_DELAY_MS);
   }
 
-  // ===================================================================
-  // MOTOR FUNCTIONS
-  // ===================================================================
-  void dur() {
-    analogWrite(L_RPWM, 0); analogWrite(L_LPWM, 0);
-    analogWrite(R_RPWM, 0); analogWrite(R_LPWM, 0);
+  if (count == 0) {
+    return false;
   }
 
-  void sondajYukari() {
-    analogWrite(M3_RPWM, DRILL_PWM);
-    analogWrite(M3_LPWM, 0);
+  rawXAvg = sx / (float)count;
+  rawYAvg = sy / (float)count;
+  rawZAvg = sz / (float)count;
+
+  calX = (rawXAvg - MAG_X_OFFSET) * MAG_X_SCALE;
+  calY = (rawYAvg - MAG_Y_OFFSET) * MAG_Y_SCALE;
+  calZ = (rawZAvg - MAG_Z_OFFSET) * MAG_Z_SCALE;
+
+  return true;
+}
+
+float calculateHeadingFromCalibrated(float calX, float calY, float calZ) {
+  float heading = 0.0;
+
+  if (activeHeadingPlane == 0) {
+    heading = atan2(calY, calX) * 180.0 / PI;
+  }
+  else if (activeHeadingPlane == 1) {
+    heading = atan2(calZ, calX) * 180.0 / PI;
+  }
+  else {
+    heading = atan2(calZ, calY) * 180.0 / PI;
   }
 
-  void sondajAsagi() {
-    analogWrite(M3_RPWM, 0);
-    analogWrite(M3_LPWM, DRILL_PWM);
+  heading = normalizeHeading(heading + headingOffsetDeg);
+  return heading;
+}
+
+
+// =======================================================
+// MOTOR FONKSİYONLARI
+// =======================================================
+void stopDrive() {
+  analogWrite(L_RPWM, 0);
+  analogWrite(L_LPWM, 0);
+
+  analogWrite(R_RPWM, 0);
+  analogWrite(R_LPWM, 0);
+
+  motorMode = "STOP";
+  currentMotorPwm = 0;
+}
+
+void driveForward(int pwm) {
+  pwm = constrain(pwm, 0, 255);
+
+  analogWrite(L_RPWM, pwm);
+  analogWrite(L_LPWM, 0);
+
+  analogWrite(R_RPWM, pwm);
+  analogWrite(R_LPWM, 0);
+
+  motorMode = "FWD";
+  currentMotorPwm = pwm;
+}
+
+void driveBackward(int pwm) {
+  pwm = constrain(pwm, 0, 255);
+
+  analogWrite(L_RPWM, 0);
+  analogWrite(L_LPWM, pwm);
+
+  analogWrite(R_RPWM, 0);
+  analogWrite(R_LPWM, pwm);
+
+  motorMode = "BACK";
+  currentMotorPwm = pwm;
+}
+
+// Sağ tank dönüşü:
+// Sol motor ileri, sağ motor geri.
+void tankRight(int pwm) {
+  pwm = constrain(pwm, 0, 255);
+
+  analogWrite(L_RPWM, pwm);
+  analogWrite(L_LPWM, 0);
+
+  analogWrite(R_RPWM, 0);
+  analogWrite(R_LPWM, pwm);
+
+  motorMode = "RIGHT";
+  currentMotorPwm = pwm;
+}
+
+// Sol tank dönüşü:
+// Sol motor geri, sağ motor ileri.
+void tankLeft(int pwm) {
+  pwm = constrain(pwm, 0, 255);
+
+  analogWrite(L_RPWM, 0);
+  analogWrite(L_LPWM, pwm);
+
+  analogWrite(R_RPWM, pwm);
+  analogWrite(R_LPWM, 0);
+
+  motorMode = "LEFT";
+  currentMotorPwm = pwm;
+}
+
+void updateMotorCommandTime() {
+  lastMotorCommandMs = millis();
+}
+
+void sondajYukari() {
+  analogWrite(M3_RPWM, DRILL_PWM);
+  analogWrite(M3_LPWM, 0);
+}
+
+void sondajAsagi() {
+  analogWrite(M3_RPWM, 0);
+  analogWrite(M3_LPWM, DRILL_PWM);
+}
+
+void sondajDur() {
+  analogWrite(M3_RPWM, 0);
+  analogWrite(M3_LPWM, 0);
+}
+
+void checkMotorWatchdog() {
+  if (motorMode == "STOP") {
+    return;
   }
 
-  void sondajDur() {
-    analogWrite(M3_RPWM, 0);
-    analogWrite(M3_LPWM, 0);
+  unsigned long now = millis();
+
+  if (now - lastMotorCommandMs > MOTOR_WATCHDOG_MS) {
+    stopDrive();
+    Serial.println("WARN,MOTOR_WATCHDOG_STOP");
+  }
+}
+
+
+// =======================================================
+// TELEMETRY
+// =======================================================
+void publishMagTelemetry() {
+  if (!telemetryEnabled) {
+    return;
   }
 
-  // ===================================================================
-  // SETUP
-  // ===================================================================
-  void setup() {
-    Serial.begin(115200);
+  unsigned long now = millis();
 
-    // Motor pins
-    pinMode(L_RPWM, OUTPUT); pinMode(L_LPWM, OUTPUT);
-    pinMode(L_REN, OUTPUT);  pinMode(L_LEN, OUTPUT);
-    pinMode(R_RPWM, OUTPUT); pinMode(R_LPWM, OUTPUT);
-    pinMode(R_REN, OUTPUT);  pinMode(R_LEN, OUTPUT);
-    pinMode(M3_RPWM, OUTPUT); pinMode(M3_LPWM, OUTPUT);
-    pinMode(M3_REN, OUTPUT);  pinMode(M3_LEN, OUTPUT);
-    digitalWrite(L_REN, HIGH); digitalWrite(L_LEN, HIGH);
-    digitalWrite(R_REN, HIGH); digitalWrite(R_LEN, HIGH);
-    digitalWrite(M3_REN, HIGH); digitalWrite(M3_LEN, HIGH);
+  if (now - lastTelemetryMs < TELEMETRY_INTERVAL_MS) {
+    return;
+  }
 
-    // Servos
-    servo1.attach(SERVO_PIN1);
-    servo2.attach(SERVO_PIN2);
-    servo3.attach(SERVO_PIN3);
-    servo4.attach(SERVO_PIN4);
-    servo5.attach(SERVO_PIN5);
+  lastTelemetryMs = now;
 
-    servo1.write(pwm3);
-    servo2.write(pwm2);
-    servo3.write(pwm1);
-    servo4.write(pwm4);
+  float rawX, rawY, rawZ;
+  float calX, calY, calZ;
+
+  if (!readCalibrated(rawX, rawY, rawZ, calX, calY, calZ)) {
+    Serial.println("MAG_ERROR,GY271_READ_FAILED");
+    return;
+  }
+
+  float heading = calculateHeadingFromCalibrated(calX, calY, calZ);
+
+  Serial.print("MAG,");
+  Serial.print(now);
+  Serial.print(",");
+  Serial.print(heading, 2);
+  Serial.print(",");
+
+  Serial.print(rawX, 0);
+  Serial.print(",");
+  Serial.print(rawY, 0);
+  Serial.print(",");
+  Serial.print(rawZ, 0);
+  Serial.print(",");
+
+  Serial.print(calX, 2);
+  Serial.print(",");
+  Serial.print(calY, 2);
+  Serial.print(",");
+  Serial.print(calZ, 2);
+  Serial.print(",");
+
+  Serial.print(planeName(activeHeadingPlane));
+  Serial.print(",");
+  Serial.print(headingOffsetDeg, 2);
+  Serial.print(",");
+
+  Serial.print(motorMode);
+  Serial.print(",");
+  Serial.print(currentMotorPwm);
+
+  Serial.println();
+}
+
+void printHeadingDebug() {
+  float rawX, rawY, rawZ;
+  float calX, calY, calZ;
+
+  if (!readCalibrated(rawX, rawY, rawZ, calX, calY, calZ)) {
+    Serial.println("GY-271 okunamadi.");
+    return;
+  }
+
+  float hXY = normalizeHeading(atan2(calY, calX) * 180.0 / PI + headingOffsetDeg);
+  float hXZ = normalizeHeading(atan2(calZ, calX) * 180.0 / PI + headingOffsetDeg);
+  float hYZ = normalizeHeading(atan2(calZ, calY) * 180.0 / PI + headingOffsetDeg);
+
+  Serial.print("RAW X:");
+  Serial.print(rawX, 0);
+  Serial.print(" Y:");
+  Serial.print(rawY, 0);
+  Serial.print(" Z:");
+  Serial.print(rawZ, 0);
+
+  Serial.print(" || CAL X:");
+  Serial.print(calX, 1);
+  Serial.print(" Y:");
+  Serial.print(calY, 1);
+  Serial.print(" Z:");
+  Serial.print(calZ, 1);
+
+  Serial.print(" || H_XY:");
+  Serial.print(hXY, 1);
+  Serial.print(" H_XZ:");
+  Serial.print(hXZ, 1);
+  Serial.print(" H_YZ:");
+  Serial.print(hYZ, 1);
+
+  Serial.print(" || ACTIVE:");
+  Serial.print(planeName(activeHeadingPlane));
+  Serial.print(" OFFSET:");
+  Serial.print(headingOffsetDeg, 1);
+
+  Serial.println();
+}
+
+void printStatus() {
+  Serial.print("STATUS,");
+  Serial.print("mag=");
+  Serial.print(magName());
+
+  Serial.print(",plane=");
+  Serial.print(planeName(activeHeadingPlane));
+
+  Serial.print(",offset=");
+  Serial.print(headingOffsetDeg, 2);
+
+  Serial.print(",telemetry=");
+  Serial.print(telemetryEnabled ? "ON" : "OFF");
+
+  Serial.print(",motor=");
+  Serial.print(motorMode);
+
+  Serial.print(",pwm=");
+  Serial.print(currentMotorPwm);
+
+  Serial.println();
+}
+
+void printHelp() {
+  Serial.println();
+  Serial.println("===== ROS2 UYUMLU KOMUTLAR =====");
+  Serial.println("TELEM:ON              -> MAG telemetry ac");
+  Serial.println("TELEM:OFF             -> MAG telemetry kapat");
+  Serial.println("MOTOR:STOP            -> Motorlari durdur");
+  Serial.println("MOTOR:FWD:<pwm>       -> Ileri");
+  Serial.println("MOTOR:BACK:<pwm>      -> Geri");
+  Serial.println("MOTOR:LEFT:<pwm>      -> Sola tank donus");
+  Serial.println("MOTOR:RIGHT:<pwm>     -> Saga tank donus");
+  Serial.println("PLANE:XY              -> Heading duzlemi XY");
+  Serial.println("PLANE:XZ              -> Heading duzlemi XZ");
+  Serial.println("PLANE:YZ              -> Heading duzlemi YZ");
+  Serial.println("OFFSET:<deg>          -> Heading offset gir");
+  Serial.println("HEADING               -> Debug heading yazdir");
+  Serial.println("STATUS                -> Sistem durumunu yazdir");
+  Serial.println("PING                  -> PONG");
+  Serial.println();
+  Serial.println("Eski manuel komutlar da desteklenir:");
+  Serial.println("ileri_hizli, ileri_yavas, geri_hizli, geri_yavas");
+  Serial.println("sag_hizli, sag_yavas, sol_hizli, sol_yavas, dur");
+  Serial.println("sondaj:yukari, sondaj:asagi, sondaj:dur");
+  Serial.println("===============================");
+  Serial.println();
+}
+
+
+// =======================================================
+// SERIAL KOMUT PARSE
+// =======================================================
+bool handleMotorCommand(String veri) {
+  if (veri == "MOTOR:STOP") {
+    stopDrive();
+    updateMotorCommandTime();
+    Serial.println("ACK,MOTOR:STOP");
+    return true;
+  }
+
+  if (veri.startsWith("MOTOR:FWD:")) {
+    int pwm = parsePwmValue(veri.substring(10));
+    driveForward(pwm);
+    updateMotorCommandTime();
+    Serial.print("ACK,MOTOR:FWD:");
+    Serial.println(pwm);
+    return true;
+  }
+
+  if (veri.startsWith("MOTOR:BACK:")) {
+    int pwm = parsePwmValue(veri.substring(11));
+    driveBackward(pwm);
+    updateMotorCommandTime();
+    Serial.print("ACK,MOTOR:BACK:");
+    Serial.println(pwm);
+    return true;
+  }
+
+  if (veri.startsWith("MOTOR:LEFT:")) {
+    int pwm = parsePwmValue(veri.substring(11));
+    tankLeft(pwm);
+    updateMotorCommandTime();
+    Serial.print("ACK,MOTOR:LEFT:");
+    Serial.println(pwm);
+    return true;
+  }
+
+  if (veri.startsWith("MOTOR:RIGHT:")) {
+    int pwm = parsePwmValue(veri.substring(12));
+    tankRight(pwm);
+    updateMotorCommandTime();
+    Serial.print("ACK,MOTOR:RIGHT:");
+    Serial.println(pwm);
+    return true;
+  }
+
+  return false;
+}
+
+bool handleConfigCommand(String veri) {
+  if (veri == "PING") {
+    Serial.println("PONG");
+    return true;
+  }
+
+  if (veri == "HELP" || veri == "help") {
+    printHelp();
+    return true;
+  }
+
+  if (veri == "STATUS") {
+    printStatus();
+    return true;
+  }
+
+  if (veri == "HEADING") {
+    printHeadingDebug();
+    return true;
+  }
+
+  if (veri == "TELEM:ON") {
+    telemetryEnabled = true;
+    Serial.println("ACK,TELEM:ON");
+    return true;
+  }
+
+  if (veri == "TELEM:OFF") {
+    telemetryEnabled = false;
+    Serial.println("ACK,TELEM:OFF");
+    return true;
+  }
+
+  if (veri == "PLANE:XY") {
+    activeHeadingPlane = 0;
+    Serial.println("ACK,PLANE:XY");
+    return true;
+  }
+
+  if (veri == "PLANE:XZ") {
+    activeHeadingPlane = 1;
+    Serial.println("ACK,PLANE:XZ");
+    return true;
+  }
+
+  if (veri == "PLANE:YZ") {
+    activeHeadingPlane = 2;
+    Serial.println("ACK,PLANE:YZ");
+    return true;
+  }
+
+  if (veri.startsWith("OFFSET:")) {
+    headingOffsetDeg = veri.substring(7).toFloat();
+
+    Serial.print("ACK,OFFSET:");
+    Serial.println(headingOffsetDeg, 2);
+
+    return true;
+  }
+
+  return false;
+}
+
+bool handleLegacyManualCommand(String veri) {
+  if (veri == "ileri_hizli") {
+    driveForward(PWM_HIZLI);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "ileri_yavas") {
+    driveForward(PWM_YAVAS);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "geri_hizli") {
+    driveBackward(PWM_HIZLI);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "geri_yavas") {
+    driveBackward(PWM_YAVAS);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "sag_hizli") {
+    tankRight(PWM_HIZLI);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "sag_yavas") {
+    tankRight(PWM_YAVAS);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "sol_hizli") {
+    tankLeft(PWM_HIZLI);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "sol_yavas") {
+    tankLeft(PWM_YAVAS);
+    updateMotorCommandTime();
+    return true;
+  }
+  else if (veri == "dur") {
+    stopDrive();
+    updateMotorCommandTime();
+    return true;
+  }
+
+  else if (veri == "sondaj:yukari") {
+    sondajYukari();
+    return true;
+  }
+  else if (veri == "sondaj:asagi") {
+    sondajAsagi();
+    return true;
+  }
+  else if (veri == "sondaj:dur") {
+    sondajDur();
+    return true;
+  }
+
+  else if (veri == "servo5:yukari") {
+    pwm5 += STEP;
+    pwm5 = constrain(pwm5, 0, 180);
     servo5.write(pwm5);
-
-    // IMU sensors (I2C)
-    Wire.begin();          // Mega: SDA=20, SCL=21
-    Wire.setClock(100000);
-    initMPU();
-    initMag();
+    return true;
+  }
+  else if (veri == "servo5:asagi") {
+    pwm5 -= STEP;
+    pwm5 = constrain(pwm5, 0, 180);
+    servo5.write(pwm5);
+    return true;
   }
 
-  // ===================================================================
-  // LOOP
-  // ===================================================================
-  void loop() {
+  return false;
+}
 
-    // --- Send IMU data at 20 Hz ---
-    unsigned long now = millis();
-    if (now - lastImuSendTime >= IMU_SEND_INTERVAL_MS) {
-      sendImuData();
-      lastImuSendTime = now;
+void processSerialLine(String veri) {
+  veri.trim();
+
+  if (veri.length() == 0) {
+    return;
+  }
+
+  if (handleMotorCommand(veri)) {
+    return;
+  }
+
+  if (handleConfigCommand(veri)) {
+    return;
+  }
+
+  if (handleLegacyManualCommand(veri)) {
+    return;
+  }
+
+  Serial.print("WARN,UNKNOWN_COMMAND:");
+  Serial.println(veri);
+}
+
+// Serial'i bloklamadan okuyoruz.
+void handleSerialInput() {
+  static String line = "";
+
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == '\n' || c == '\r') {
+      if (line.length() > 0) {
+        processSerialLine(line);
+        line = "";
+      }
     }
+    else {
+      line += c;
 
-    // --- Process incoming motor/servo commands from Pi ---
-    if (Serial.available()) {
-      String veri = Serial.readStringUntil('\n');
-      veri.trim();
-
-      // === Yön komutlari ===
-      if (veri == "ileri_hizli") {
-        analogWrite(L_RPWM, PWM_HIZLI); analogWrite(L_LPWM, 0);
-        analogWrite(R_RPWM, PWM_HIZLI); analogWrite(R_LPWM, 0);
-      }
-      else if (veri == "ileri_yavas") {
-        analogWrite(L_RPWM, PWM_YAVAS); analogWrite(L_LPWM, 0);
-        analogWrite(R_RPWM, PWM_YAVAS); analogWrite(R_LPWM, 0);
-      }
-      else if (veri == "geri_hizli") {
-        analogWrite(L_RPWM, 0); analogWrite(L_LPWM, PWM_HIZLI);
-        analogWrite(R_RPWM, 0); analogWrite(R_LPWM, PWM_HIZLI);
-      }
-      else if (veri == "geri_yavas") {
-        analogWrite(L_RPWM, 0); analogWrite(L_LPWM, PWM_YAVAS);
-        analogWrite(R_RPWM, 0); analogWrite(R_LPWM, PWM_YAVAS);
-      }
-      else if (veri == "sag_hizli") {
-        analogWrite(L_RPWM, PWM_HIZLI); analogWrite(L_LPWM, 0);
-        analogWrite(R_RPWM, 0);         analogWrite(R_LPWM, PWM_HIZLI);
-      }
-      else if (veri == "sag_yavas") {
-        analogWrite(L_RPWM, PWM_YAVAS); analogWrite(L_LPWM, 0);
-        analogWrite(R_RPWM, 0);         analogWrite(R_LPWM, PWM_YAVAS);
-      }
-      else if (veri == "sol_hizli") {
-        analogWrite(L_RPWM, 0);         analogWrite(L_LPWM, PWM_HIZLI);
-        analogWrite(R_RPWM, PWM_HIZLI); analogWrite(R_LPWM, 0);
-      }
-      else if (veri == "sol_yavas") {
-        analogWrite(L_RPWM, 0);         analogWrite(L_LPWM, PWM_YAVAS);
-        analogWrite(R_RPWM, PWM_YAVAS); analogWrite(R_LPWM, 0);
-      }
-      else if (veri == "dur") dur();
-
-      // === Sondaj komutlari ===
-      else if (veri == "sondaj:yukari") sondajYukari();
-      else if (veri == "sondaj:asagi") sondajAsagi();
-      else if (veri == "sondaj:dur") sondajDur();
-
-      // === Servo5 buton kontrolü ===
-      else if (veri == "servo5:yukari") {
-        pwm5 += STEP;
-        pwm5 = constrain(pwm5, 0, 180);
-        servo5.write(pwm5);
-      }
-      else if (veri == "servo5:asagi") {
-        pwm5 -= STEP;
-        pwm5 = constrain(pwm5, 0, 180);
-        servo5.write(pwm5);
-      }
-
-      // === Normal servo (x2, y2, y3, x3) ===
-      else if (veri.startsWith("y2:")) {
-        int deger = veri.substring(3).toInt();
-        int diff = deger - JOY_CENTER;
-        if (abs(diff) > DEADZONE) {
-          pwm3 += (diff > 0) ? STEP : -STEP;
-          pwm3 = constrain(pwm3, 0, 180);
-          servo3.write(pwm3);
-        }
-      }
-
-      else if (veri.startsWith("y3:")) {
-        int deger = veri.substring(3).toInt();
-        int diff = deger - JOY_CENTER;
-        if (abs(diff) > DEADZONE) {
-          pwm4 += (diff > 0) ? STEP : -STEP;
-          pwm4 = constrain(pwm4, 0, 180);
-          servo4.write(pwm4);
-        }
-      }
-
-      // === Çok turlu servo1 ===
-      else if (veri.startsWith("x3:")) {
-        int deger = veri.substring(3).toInt();
-        int diff = deger - JOY_CENTER;
-        if (abs(diff) > DEADZONE) {
-          if (diff > 0) {
-            if (pwm1 >= ((turSayisi1 == MAX_TUR) ? SAFE_MAX1_SECOND : SAFE_MAX)) {
-              if (turSayisi1 < MAX_TUR) {
-                servo1.write(TUR_PWM_YUKARI);
-                delay(TUR_MS);
-                pwm1 = SONRAKI_YUK_PWM1;
-                turSayisi1++;
-              }
-            } else pwm1 += STEP;
-          } else {
-            if (pwm1 <= SAFE_MIN) {
-              if (turSayisi1 > 1) {
-                servo1.write(TUR_PWM_ASAGI);
-                delay(TUR_MS);
-                pwm1 = SONRAKI_ASG_PWM1;
-                turSayisi1--;
-              }
-            } else pwm1 -= STEP;
-          }
-          int safeMax1 = (turSayisi1 == MAX_TUR) ? SAFE_MAX1_SECOND : SAFE_MAX;
-          pwm1 = constrain(pwm1, SAFE_MIN, safeMax1);
-          servo1.write(pwm1);
-        }
-      }
-
-      // === Çok turlu servo2 ===
-      else if (veri.startsWith("x2:")) {
-        int deger = veri.substring(3).toInt();
-        int diff = deger - JOY_CENTER;
-        if (abs(diff) > DEADZONE) {
-          if (diff > 0) {
-            if (pwm2 >= SAFE_MAX) {
-              if (turSayisi2 < MAX_TUR) {
-                servo2.write(TUR_PWM_YUKARI);
-                delay(TUR_MS);
-                pwm2 = SONRAKI_YUK_PWM2;
-                turSayisi2++;
-              }
-            } else pwm2 += STEP;
-          } else {
-            if (pwm2 <= SAFE_MIN) {
-              if (turSayisi2 > 1) {
-                servo2.write(TUR_PWM_ASAGI);
-                delay(TUR_MS);
-                pwm2 = SONRAKI_ASG_PWM2;
-                turSayisi2--;
-              }
-            } else pwm2 -= STEP;
-          }
-          pwm2 = constrain(pwm2, SAFE_MIN, SAFE_MAX);
-          servo2.write(pwm2);
-        }
+      if (line.length() > 120) {
+        line = "";
+        Serial.println("WARN,SERIAL_LINE_TOO_LONG");
       }
     }
   }
+}
+
+
+// =======================================================
+// SETUP
+// =======================================================
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+  delay(1000);
+
+  Wire.begin();          // Arduino Mega: SDA=20, SCL=21
+  Wire.setClock(100000);
+
+  pinMode(L_RPWM, OUTPUT);
+  pinMode(L_LPWM, OUTPUT);
+  pinMode(L_REN, OUTPUT);
+  pinMode(L_LEN, OUTPUT);
+
+  pinMode(R_RPWM, OUTPUT);
+  pinMode(R_LPWM, OUTPUT);
+  pinMode(R_REN, OUTPUT);
+  pinMode(R_LEN, OUTPUT);
+
+  pinMode(M3_RPWM, OUTPUT);
+  pinMode(M3_LPWM, OUTPUT);
+  pinMode(M3_REN, OUTPUT);
+  pinMode(M3_LEN, OUTPUT);
+
+  digitalWrite(L_REN, HIGH);
+  digitalWrite(L_LEN, HIGH);
+
+  digitalWrite(R_REN, HIGH);
+  digitalWrite(R_LEN, HIGH);
+
+  digitalWrite(M3_REN, HIGH);
+  digitalWrite(M3_LEN, HIGH);
+
+  stopDrive();
+  sondajDur();
+
+  servo1.attach(SERVO_PIN1);
+  servo2.attach(SERVO_PIN2);
+  servo3.attach(SERVO_PIN3);
+  servo4.attach(SERVO_PIN4);
+  servo5.attach(SERVO_PIN5);
+
+  servo1.write(pwm1);
+  servo2.write(pwm2);
+  servo3.write(pwm3);
+  servo4.write(pwm4);
+  servo5.write(pwm5);
+
+  Serial.println();
+  Serial.println("ARC'26 Rover ROS2 Arduino Firmware Basladi.");
+  Serial.println("Arduino Mega I2C: SDA=20, SCL=21");
+  Serial.println("Serial baud: 115200");
+
+  initMagnetometer();
+
+  printHelp();
+
+  lastMotorCommandMs = millis();
+  lastTelemetryMs = millis();
+}
+
+
+// =======================================================
+// LOOP
+// =======================================================
+void loop() {
+  handleSerialInput();
+  checkMotorWatchdog();
+  publishMagTelemetry();
+}
