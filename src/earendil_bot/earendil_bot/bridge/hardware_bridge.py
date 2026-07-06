@@ -403,8 +403,14 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('Kullanıcı tarafından durduruldu (Ctrl+C).')
+    except Exception as e:
+        node.get_logger().error(f'Beklenmeyen hata: {e}')
     finally:
+        node.get_logger().info('Donanım köprüsü kapanıyor. Motorlara kesin durma komutu gönderiliyor...')
+        node._send_raw("MOTOR:STOP")
+        time.sleep(0.1)
+        node._send_raw("MOTOR:STOP")
         if rclpy.ok():
             node.destroy_node()
             rclpy.shutdown()

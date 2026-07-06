@@ -4,6 +4,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 import math
+import time
 
 class LidarMotorTestNode(Node):
     def __init__(self):
@@ -28,6 +29,7 @@ class LidarMotorTestNode(Node):
         
         self.forward_speed_approach = self.get_parameter('forward_speed_approach').value
         self.forward_speed_tunnel = self.get_parameter('forward_speed_tunnel').value
+        self.safety_speed = self.get_parameter('safety_speed').value
         self.kp = self.get_parameter('kp').value
         self.kd = self.get_parameter('kd').value
         self.safety_threshold = self.get_parameter('safety_threshold').value
@@ -119,10 +121,16 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('Kullanıcı tarafından durduruldu (Ctrl+C).')
+    except Exception as e:
+        node.get_logger().error(f'Beklenmeyen hata: {e}')
     finally:
+        node.get_logger().info('Motorlar kesin olarak durduruluyor...')
         stop_twist = Twist()
-        node.cmd_pub.publish(stop_twist)
+        # Mesajin iletildiginden emin olmak icin 3 kez gonder ve bekle
+        for _ in range(3):
+            node.cmd_pub.publish(stop_twist)
+            time.sleep(0.1)
         node.destroy_node()
         rclpy.shutdown()
 
