@@ -18,7 +18,7 @@ hardware_bridge:
 
     # Motor PWM Limits
     min_pwm: 60
-    max_pwm: 255
+    max_pwm: 90
 
 # Infrared Sensor Configuration
 ir_bridge:

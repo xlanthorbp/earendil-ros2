@@ -27,7 +27,6 @@
 // PING
 // =======================================================
 
-
 // =======================================================
 // GY-271 ADRESLERI
 // =======================================================
@@ -36,20 +35,15 @@
 
 #define SERIAL_BAUD 115200
 
-// 100 ms -> yaklaşık 10 Hz telemetry
 #define TELEMETRY_INTERVAL_MS 100
-
-// Magnetometer ortalama sayısı
 #define SAMPLE_COUNT 8
 #define SAMPLE_DELAY_MS 2
 
-// Raspberry'den motor komutu kesilirse motor durur
 #define MOTOR_WATCHDOG_MS 700
-
 
 // =======================================================
 // GY-271 KALIBRASYON DEGERLERI
-// Daha önce rover üzerinde ayarlanan doğru değerler
+// Daha once rover uzerinde ayarlanan degerler
 // =======================================================
 #define MAG_X_OFFSET -1264.50
 #define MAG_Y_OFFSET 311.00
@@ -59,22 +53,17 @@
 #define MAG_Y_SCALE 0.70439
 #define MAG_Z_SCALE 2.78393
 
-
 // =======================================================
 // HEADING AYARLARI
 // =======================================================
 // 0 = XY, 1 = XZ, 2 = YZ
 #define HEADING_PLANE_DEFAULT 0
 
-// Daha önce sahada ayarlanan offset
+// Sahada ayarlanan offset
 #define HEADING_OFFSET_DEFAULT -53.5
 
-// 4 noktalı heading düzeltme aktif
-#define HEADING_CORRECTION_ENABLED true
-
-
 // =======================================================
-// MOTOR SÜRÜCÜ PİNLERİ
+// MOTOR SURUCU PINLERI
 // =======================================================
 const int L_RPWM = 5;
 const int L_LPWM = 6;
@@ -90,23 +79,17 @@ const int R_LEN  = 12;
 const int M3_RPWM = 4;
 const int M3_LPWM = 13;
 const int M3_REN  = 45;
-
-// Bizim son bağlantı notumuzda 46 idi.
-// Eğer sende fiziksel olarak 52'ye bağlıysa sadece bu satırı 52 yap.
-const int M3_LEN  = 46;
-
+const int M3_LEN  = 46;   // Eger fiziksel baglanti 52 ise bunu 52 yap
 
 // =======================================================
 // PWM AYARLARI
 // =======================================================
-#define PWM_YAVAS 80
-#define PWM_HIZLI 200
+#define PWM_YAVAS 60
+#define PWM_HIZLI 90
 const int DRILL_PWM = 200;
-
 
 // =======================================================
 // SERVO NESNELERI
-// Eski manuel sistemdeki servo komutları korunmuştur.
 // =======================================================
 Servo servo1;
 Servo servo2;
@@ -146,7 +129,6 @@ const int JOY_CENTER = 2048;
 const int DEADZONE   = 400;
 const int STEP       = 2;
 
-
 // =======================================================
 // MAGNETOMETER STATE
 // =======================================================
@@ -157,7 +139,6 @@ enum MagType {
 };
 
 MagType magType = MAG_NONE;
-
 
 // =======================================================
 // SYSTEM STATE
@@ -172,7 +153,6 @@ unsigned long lastMotorCommandMs = 0;
 
 String motorMode = "STOP";
 int currentMotorPwm = 0;
-
 
 // =======================================================
 // GENEL YARDIMCI FONKSIYONLAR
@@ -209,59 +189,6 @@ int parsePwmValue(String s) {
   int pwm = s.toInt();
   pwm = constrain(pwm, 0, 255);
   return pwm;
-}
-
-float linearMapFloat(float x, float inA, float inB, float outA, float outB) {
-  return outA + (x - inA) * (outB - outA) / (inB - inA);
-}
-
-
-// =======================================================
-// HEADING DÜZELTME TABLOSU
-// =======================================================
-// Motor kapalıyken ölçülen değerler:
-//
-// Gerçek 0°   -> Ölçülen 19°
-// Gerçek 90°  -> Ölçülen 89°
-// Gerçek 180° -> Ölçülen 203°
-// Gerçek 270° -> Ölçülen 299°
-//
-// Bu fonksiyon ölçülen heading'i gerçek heading'e yaklaştırır.
-// Bu düzeltme PLANE:XY ve OFFSET:-53.5 için geçerlidir.
-// Sensör yeri değişirse bu tablo yeniden ölçülmelidir.
-// =======================================================
-float correctHeadingDeg(float h) {
-  if (!HEADING_CORRECTION_ENABLED) {
-    return normalizeHeading(h);
-  }
-
-  h = normalizeHeading(h);
-
-  float x = h;
-
-  // Wrap bölgesi:
-  // measured 299 -> true 270
-  // measured 19  -> true 360/0
-  if (x < 19.0) {
-    x += 360.0;
-  }
-
-  float corrected = 0.0;
-
-  if (x >= 19.0 && x < 89.0) {
-    corrected = linearMapFloat(x, 19.0, 89.0, 0.0, 90.0);
-  }
-  else if (x >= 89.0 && x < 203.0) {
-    corrected = linearMapFloat(x, 89.0, 203.0, 90.0, 180.0);
-  }
-  else if (x >= 203.0 && x < 299.0) {
-    corrected = linearMapFloat(x, 203.0, 299.0, 180.0, 270.0);
-  }
-  else {
-    corrected = linearMapFloat(x, 299.0, 379.0, 270.0, 360.0);
-  }
-
-  return normalizeHeading(corrected);
 }
 
 
@@ -422,11 +349,6 @@ float calculateMeasuredHeadingFromCalibrated(float calX, float calY, float calZ)
   return heading;
 }
 
-float calculateCorrectedHeadingFromCalibrated(float calX, float calY, float calZ) {
-  float measuredHeading = calculateMeasuredHeadingFromCalibrated(calX, calY, calZ);
-  return correctHeadingDeg(measuredHeading);
-}
-
 
 // =======================================================
 // MOTOR FONKSIYONLARI
@@ -468,11 +390,10 @@ void driveBackward(int pwm) {
   currentMotorPwm = pwm;
 }
 
-// Sağ tank dönüşü:
-// Sol motor ileri, sağ motor geri.
 void tankRight(int pwm) {
   pwm = constrain(pwm, 0, 255);
 
+  // Sol ileri, sag geri
   analogWrite(L_RPWM, pwm);
   analogWrite(L_LPWM, 0);
 
@@ -483,11 +404,10 @@ void tankRight(int pwm) {
   currentMotorPwm = pwm;
 }
 
-// Sol tank dönüşü:
-// Sol motor geri, sağ motor ileri.
 void tankLeft(int pwm) {
   pwm = constrain(pwm, 0, 255);
 
+  // Sol geri, sag ileri
   analogWrite(L_RPWM, 0);
   analogWrite(L_LPWM, pwm);
 
@@ -530,7 +450,6 @@ void checkMotorWatchdog() {
   }
 }
 
-
 // =======================================================
 // TELEMETRY
 // =======================================================
@@ -555,10 +474,8 @@ void publishMagTelemetry() {
     return;
   }
 
-  float measuredHeading = calculateMeasuredHeadingFromCalibrated(calX, calY, calZ);
-  float heading = correctHeadingDeg(measuredHeading);
+  float heading = calculateMeasuredHeadingFromCalibrated(calX, calY, calZ);
 
-  // ROS2 bridge bu satırdaki 3. alanı heading olarak kullanır.
   Serial.print("MAG,");
   Serial.print(now);
   Serial.print(",");
@@ -601,7 +518,6 @@ void printHeadingDebug() {
   }
 
   float measuredHeading = calculateMeasuredHeadingFromCalibrated(calX, calY, calZ);
-  float correctedHeading = correctHeadingDeg(measuredHeading);
 
   float hXY_measured = normalizeHeading(atan2(calY, calX) * 180.0 / PI + headingOffsetDeg);
   float hXZ_measured = normalizeHeading(atan2(calZ, calX) * 180.0 / PI + headingOffsetDeg);
@@ -634,9 +550,6 @@ void printHeadingDebug() {
   Serial.print(" MEAS:");
   Serial.print(measuredHeading, 1);
 
-  Serial.print(" CORR:");
-  Serial.print(correctedHeading, 1);
-
   Serial.print(" OFFSET:");
   Serial.print(headingOffsetDeg, 1);
 
@@ -653,9 +566,6 @@ void printStatus() {
 
   Serial.print(",offset=");
   Serial.print(headingOffsetDeg, 2);
-
-  Serial.print(",heading_correction=");
-  Serial.print(HEADING_CORRECTION_ENABLED ? "ON" : "OFF");
 
   Serial.print(",telemetry=");
   Serial.print(telemetryEnabled ? "ON" : "OFF");
@@ -687,7 +597,7 @@ void printHelp() {
   Serial.println("STATUS                -> Sistem durumunu yazdir");
   Serial.println("PING                  -> PONG");
   Serial.println();
-  Serial.println("Eski manuel komutlar da desteklenir:");
+  Serial.println("Eski manuel komutlar:");
   Serial.println("ileri_hizli, ileri_yavas, geri_hizli, geri_yavas");
   Serial.println("sag_hizli, sag_yavas, sol_hizli, sol_yavas, dur");
   Serial.println("sondaj:yukari, sondaj:asagi, sondaj:dur");
@@ -696,7 +606,6 @@ void printHelp() {
   Serial.println("===============================");
   Serial.println();
 }
-
 
 // =======================================================
 // SERIAL KOMUT PARSE
@@ -804,7 +713,6 @@ bool handleConfigCommand(String veri) {
 
     Serial.print("ACK,OFFSET:");
     Serial.println(headingOffsetDeg, 2);
-
     return true;
   }
 
@@ -812,7 +720,6 @@ bool handleConfigCommand(String veri) {
 }
 
 bool handleLegacyManualCommand(String veri) {
-  // Eski manuel yön komutları
   if (veri == "ileri_hizli") {
     driveForward(PWM_HIZLI);
     updateMotorCommandTime();
@@ -858,8 +765,6 @@ bool handleLegacyManualCommand(String veri) {
     updateMotorCommandTime();
     return true;
   }
-
-  // Sondaj
   else if (veri == "sondaj:yukari") {
     sondajYukari();
     return true;
@@ -872,8 +777,6 @@ bool handleLegacyManualCommand(String veri) {
     sondajDur();
     return true;
   }
-
-  // Servo5
   else if (veri == "servo5:yukari") {
     pwm5 += STEP;
     pwm5 = constrain(pwm5, 0, 180);
@@ -886,8 +789,6 @@ bool handleLegacyManualCommand(String veri) {
     servo5.write(pwm5);
     return true;
   }
-
-  // Normal servo3
   else if (veri.startsWith("y2:")) {
     int deger = veri.substring(3).toInt();
     int diff = deger - JOY_CENTER;
@@ -900,8 +801,6 @@ bool handleLegacyManualCommand(String veri) {
 
     return true;
   }
-
-  // Normal servo4
   else if (veri.startsWith("y3:")) {
     int deger = veri.substring(3).toInt();
     int diff = deger - JOY_CENTER;
@@ -914,8 +813,6 @@ bool handleLegacyManualCommand(String veri) {
 
     return true;
   }
-
-  // Çok turlu servo1
   else if (veri.startsWith("x3:")) {
     int deger = veri.substring(3).toInt();
     int diff = deger - JOY_CENTER;
@@ -955,8 +852,6 @@ bool handleLegacyManualCommand(String veri) {
 
     return true;
   }
-
-  // Çok turlu servo2
   else if (veri.startsWith("x2:")) {
     int deger = veri.substring(3).toInt();
     int diff = deger - JOY_CENTER;
@@ -1022,7 +917,6 @@ void processSerialLine(String veri) {
   Serial.println(veri);
 }
 
-// Serial'i bloklamadan okuyoruz.
 void handleSerialInput() {
   static String line = "";
 
@@ -1046,7 +940,6 @@ void handleSerialInput() {
   }
 }
 
-
 // =======================================================
 // SETUP
 // =======================================================
@@ -1054,7 +947,7 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(1000);
 
-  Wire.begin();          // Arduino Mega: SDA=20, SCL=21
+  Wire.begin();
   Wire.setClock(100000);
 
   pinMode(L_RPWM, OUTPUT);
@@ -1102,13 +995,11 @@ void setup() {
   Serial.println("Serial baud: 115200");
 
   initMagnetometer();
-
   printHelp();
 
   lastMotorCommandMs = millis();
   lastTelemetryMs = millis();
 }
-
 
 // =======================================================
 // LOOP

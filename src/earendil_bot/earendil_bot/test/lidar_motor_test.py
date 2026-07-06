@@ -22,7 +22,7 @@ class LidarMotorTestNode(Node):
         self.declare_parameter('safety_speed', 0.1)
         self.declare_parameter('kp', 0.5)
         self.declare_parameter('kd', 1.0)
-        self.declare_parameter('safety_threshold', 0.1)
+        self.declare_parameter('safety_threshold', 0.25)
         self.declare_parameter('tunnel_detection_threshold', 0.3)
         self.declare_parameter('window_deg', 10.0)
         
@@ -94,21 +94,19 @@ class LidarMotorTestNode(Node):
                 self.get_logger().info(f'---> DUVARLAR BITTI! (Sol: {left_dist:.2f}m, Sag: {right_dist:.2f}m). TUNELDEN CIKILDI!')
                 self.state = 'COMPLETED'
             else:
-                # Centering logic
+                # Basit kacisma mantigi (PD yok)
                 if left_dist < self.safety_threshold:
-                    self.get_logger().warn('Sol duvara cok yakin!', throttle_duration_sec=1.0)
+                    self.get_logger().warn('Sol duvara cok yakin! Saga donuluyor.', throttle_duration_sec=1.0)
                     twist.linear.x = self.safety_speed
-                    twist.angular.z = -0.8
+                    twist.angular.z = -0.15  # Yavasca saga don
                 elif right_dist < self.safety_threshold:
-                    self.get_logger().warn('Sag duvara cok yakin!', throttle_duration_sec=1.0)
+                    self.get_logger().warn('Sag duvara cok yakin! Sola donuluyor.', throttle_duration_sec=1.0)
                     twist.linear.x = self.safety_speed
-                    twist.angular.z = 0.8
+                    twist.angular.z = 0.15   # Yavasca sola don
                 else:
-                    error = left_dist - right_dist
-                    derivative = error - self.previous_error
+                    # Mesafe 25 santimetreyi gectiginde donmeyi birak, duz git
                     twist.linear.x = self.forward_speed_tunnel
-                    twist.angular.z = (self.kp * error) + (self.kd * derivative)
-                    self.previous_error = error
+                    twist.angular.z = 0.0
                     
         elif self.state == 'COMPLETED':
             twist.linear.x = 0.0
