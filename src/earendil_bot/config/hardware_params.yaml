@@ -1,15 +1,16 @@
 # hardware_params.yaml
 # Hardware configurations for Earendil Bot (Encoder, IMU, Magnetometer, Motor)
 
+# Magnetometer and Motor Configuration
 hardware_bridge:
   ros__parameters:
     # Serial Port Settings
-    port: "/dev/ttyUSB1"
+    port: "/dev/ttyUSBx"
     baudrate: 115200
 
     # Kinematics (For Odometry)
-    wheel_radius: 0.033           # meters (3.3 cm radius -> 6.6 cm diameter)
-    wheel_separation: 0.160       # meters (16 cm distance between left and right wheels)
+    wheel_radius: 0.15            # meters (URDF'ten alındı: wheel_link_radius = 0.15)
+    wheel_separation: 0.7         # meters (URDF'ten alındı: body_link_y_dim (0.6) + wheel_link_length (0.1) = 0.7)
     ticks_per_rev: 341.2          # Encoder ticks per 1 full wheel revolution (Adjust for your specific motor gear ratio)
     
     # Magnetometer (Yaw Offset)
@@ -19,6 +20,7 @@ hardware_bridge:
     min_pwm: 60
     max_pwm: 255
 
+# Infrared Sensor Configuration
 ir_bridge:
   ros__parameters:
     port: "/dev/ttyUSBx"
@@ -35,5 +37,5 @@ rtk_node:
 # 2D Lidar Node Configuration
 STL27L:
   ros__parameters:
-    port_name: "/dev/ttyUSB0"
+    port_name: "/dev/ttyUSBx"
     port_baudrate: 921600

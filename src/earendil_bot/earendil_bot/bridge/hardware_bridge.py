@@ -52,6 +52,7 @@ class HardwareBridgeNode(Node):
         self.last_cmd = None
         self.last_cmd_time = time.time()
         self.serial_buffer = ""
+        self.buffer_lock = threading.Lock()
         
         # Sensor Watchdog State
         self.last_enc_time = 0.0
@@ -199,12 +200,15 @@ class HardwareBridgeNode(Node):
                     with self.serial_lock:
                         chunk = self.ser.read(waiting).decode('ascii', errors='ignore')
                     
-                    self.serial_buffer += chunk
-                    
-                    while '\n' in self.serial_buffer:
-                        line, self.serial_buffer = self.serial_buffer.split('\n', 1)
-                        line = line.strip()
+                    lines_to_process = []
+                    with self.buffer_lock:
+                        self.serial_buffer += chunk
                         
+                        while '\n' in self.serial_buffer:
+                            line, self.serial_buffer = self.serial_buffer.split('\n', 1)
+                            lines_to_process.append(line.strip())
+                            
+                    for line in lines_to_process:
                         if not line:
                             continue
 

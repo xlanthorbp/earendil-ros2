@@ -144,8 +144,7 @@ class IglooExitNode(Node):
         self.get_logger().info(f'🔄 Original Yaw: {math.degrees(self.current_yaw):.1f}°, Saved (Reversed) Yaw: {math.degrees(reversed_yaw)%360:.1f}°')
         
         self.state = 'DONE'
-        rclpy.shutdown()
-        sys.exit(0)
+        raise SystemExit
 
 
 def main(args=None):
@@ -153,7 +152,7 @@ def main(args=None):
     node = IglooExitNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         if rclpy.ok():

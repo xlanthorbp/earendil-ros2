@@ -17,12 +17,12 @@
 
 // Pusula kalibrasyon
 #define MAG_SAMPLE_COUNT 10
-#define MAG_X_OFFSET 0.0
-#define MAG_Y_OFFSET 0.0
-#define MAG_Z_OFFSET 0.0
-#define MAG_X_SCALE 1.0
-#define MAG_Y_SCALE 1.0
-#define MAG_Z_SCALE 1.0
+#define MAG_X_OFFSET -1264.50
+#define MAG_Y_OFFSET 311.00
+#define MAG_Z_OFFSET -73.50
+#define MAG_X_SCALE 0.81943
+#define MAG_Y_SCALE 0.70439
+#define MAG_Z_SCALE 2.78393
 #define HEADING_OFFSET_DEG 0.0
 #define INVERT_HEADING false
 

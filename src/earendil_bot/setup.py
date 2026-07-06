@@ -18,7 +18,6 @@ setup(
 
         (os.path.join('share', package_name, 'config'), [
             'config/twist_mux.yaml',
-            'config/controllers.yaml',
             'config/test_params.yaml',
             'config/tunnel_params.yaml',
             'config/hardware_params.yaml',
@@ -46,6 +45,8 @@ setup(
             'ir_bridge = earendil_bot.bridge.ir_bridge:main',
             'aruco_detector = earendil_bot.test.aruco_detector:main',
             'hardware_check = earendil_bot.hardware_check:main',
+            'rtk_node = earendil_bot.gps.rtk_node:main',
+            'lidar_motor_test = earendil_bot.test.lidar_motor_test:main',
         ],
     },
 )

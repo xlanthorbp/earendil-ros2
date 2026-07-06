@@ -5,7 +5,19 @@ tunnel_navigator:
     safety_speed: 0.1
     kp: 0.5
     kd: 1.0
-    safety_threshold: 0.1
-    tunnel_detection_threshold: 0.3
+    kp_aruco: 0.02
+    safety_threshold: 0.70
+    tunnel_detection_threshold: 1.0
     sensor_height_from_ground: 1.0
+    window_deg: 10.0
+
+lidar_motor_test:
+  ros__parameters:
+    forward_speed_approach: 0.2
+    forward_speed_tunnel: 0.3
+    safety_speed: 0.1
+    kp: 0.5
+    kd: 1.0
+    safety_threshold: 0.70
+    tunnel_detection_threshold: 1.0
     window_deg: 10.0
