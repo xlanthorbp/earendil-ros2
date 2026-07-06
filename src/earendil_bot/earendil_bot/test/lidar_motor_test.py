@@ -4,7 +4,6 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 import math
-import time
 
 class LidarMotorTestNode(Node):
     def __init__(self):
@@ -36,8 +35,17 @@ class LidarMotorTestNode(Node):
         self.tunnel_detection_threshold = self.get_parameter('tunnel_detection_threshold').value
         self.window_deg = self.get_parameter('window_deg').value
         
+        # ROS 2 Shutdown (Kapanma) Kancası: Düğüm kapandığında (hata veya normal) tetiklenir
+        rclpy.get_default_context().on_shutdown(self.stop_motors_safely)
+        
         self.get_logger().info('Lidar & Motor Test Node Started.')
         self.get_logger().info('State: SEARCHING_ENTRANCE (Moving forward, looking for walls)')
+
+    def stop_motors_safely(self):
+        """Düğüm herhangi bir sebeple kapandığında motorlara 0 hız gönderir."""
+        self.get_logger().info('Kapanma sinyali alındı: Motorlar güvenlik için durduruluyor...')
+        stop_twist = Twist()
+        self.cmd_pub.publish(stop_twist)
 
     def get_avg_distance(self, msg, target_angle_deg):
         target_rad = math.radians(target_angle_deg)
@@ -121,16 +129,10 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info('Kullanıcı tarafından durduruldu (Ctrl+C).')
-    except Exception as e:
-        node.get_logger().error(f'Beklenmeyen hata: {e}')
+        pass
     finally:
-        node.get_logger().info('Motorlar kesin olarak durduruluyor...')
         stop_twist = Twist()
-        # Mesajin iletildiginden emin olmak icin 3 kez gonder ve bekle
-        for _ in range(3):
-            node.cmd_pub.publish(stop_twist)
-            time.sleep(0.1)
+        node.cmd_pub.publish(stop_twist)
         node.destroy_node()
         rclpy.shutdown()
 
