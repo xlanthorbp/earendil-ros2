@@ -22,14 +22,7 @@ def generate_launch_description():
                 os.path.join(ldlidar_share_dir, 'launch', 'stl27l.launch.py')
             )
         ),
-        
-        # 2. Start SHARP Infrared Sensor Bridge
-        Node(
-            package='earendil_bot',
-            executable='ir_bridge',
-            name='ir_bridge',
-            output='screen'
-        ),
+        # (IR Bridge has been merged into hardware_bridge)
         
         # 3. Start Tunnel Navigation Node (With parameters)
         Node(

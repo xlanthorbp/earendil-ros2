@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y \
 
 # 2. Copy package.xml files first to utilize Docker layer caching.
 COPY src/earendil_bot/package.xml src/earendil_bot/package.xml
-COPY src/earendil_hardware/package.xml src/earendil_hardware/package.xml
 
 # 3. Install all ROS dependencies defined in package.xml automatically
 # Notice we are using ros-base, which strips out heavy GUI tools like Gazebo/Rviz
@@ -42,7 +41,6 @@ WORKDIR /real_ws
 
 # 1. Copy package.xml again to install dependencies in the runtime image
 COPY src/earendil_bot/package.xml src/earendil_bot/package.xml
-COPY src/earendil_hardware/package.xml src/earendil_hardware/package.xml
 
 # 2. Install runtime dependencies (I2C tools removed since IMU is on Arduino)
 RUN apt-get update \

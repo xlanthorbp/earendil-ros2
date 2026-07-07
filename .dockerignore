@@ -3,6 +3,7 @@ build/
 install/
 log/
 *.log
+_dormant/
 
 # MATLAB/Simulink
 *.asv

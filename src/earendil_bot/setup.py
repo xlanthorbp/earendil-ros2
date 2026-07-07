@@ -13,16 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
-        (os.path.join('share', package_name, 'description'),
-            glob('description/*.xacro') + glob('description/*.yaml')),
-
-        (os.path.join('share', package_name, 'config'), [
-            'config/twist_mux.yaml',
-            'config/test_params.yaml',
-            'config/tunnel_params.yaml',
-            'config/hardware_params.yaml',
-        ]),
-
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -42,7 +33,6 @@ setup(
             'gps_nav_test = earendil_bot.test.gps_nav_test:main',
             'tunnel_navigator = earendil_bot.test.tunnel_navigator:main',
             'igloo_exit = earendil_bot.test.igloo_exit:main',
-            'ir_bridge = earendil_bot.bridge.ir_bridge:main',
             'aruco_detector = earendil_bot.test.aruco_detector:main',
             'hardware_check = earendil_bot.hardware_check:main',
             'rtk_node = earendil_bot.gps.rtk_node:main',

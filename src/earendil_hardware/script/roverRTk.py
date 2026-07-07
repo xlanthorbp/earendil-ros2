@@ -2,20 +2,20 @@
 # -*- coding: utf-8 -*-
 
 """
-ROVER TARAFI
+ROVER SIDE
 
 Base -> 3DR SiK Radio -> Rover LC29HEA
 
-Görev:
-1. 3DR radyodan gelen RTCM3 paketlerini okur.
-2. Sadece geçerli RTCM3 frame'lerini Rover LC29HEA GPS'e yazar.
-3. Rover GPS'ten GGA NMEA satırlarını okur.
-4. RTK durumunu, konumu, uydu sayısını, HDOP ve correction age bilgisini ekrana basar.
-5. İsterse Base'e kısa ASCII durum mesajı yollar.
+Task:
+1. Reads RTCM3 packets coming from 3DR radio.
+2. Writes only valid RTCM3 frames to Rover LC29HEA GPS.
+3. Reads GGA NMEA lines from Rover GPS.
+4. Prints RTK status, position, satellite count, HDOP and correction age to screen.
+5. Optionally sends short ASCII status message to Base.
 
-Not:
-- RF hattını boğmamak için Base'e giden durum mesajı 1 Hz ve kısa tutulmuştur.
-- Emoji, harita linki, uzun text RF hattına gönderilmez.
+Note:
+- To avoid clogging the RF line, status message to Base is kept short and at 1 Hz.
+- Emoji, map links, long texts are not sent over RF line.
 """
 
 import serial
@@ -25,13 +25,13 @@ from collections import Counter
 
 
 # =======================================================
-# 1) PORT VE BAUD AYARLARI
+# 1) PORT AND BAUD SETTINGS
 # =======================================================
 
-ROVER_GPS_PORT = "/dev/ttyUSB1"       # Windows örnek: COM9
-ROVER_RADIO_PORT = "/dev/ttyUSB2"    # Windows örnek: COM11
+ROVER_GPS_PORT = "/dev/ttyUSB1"       # Windows example: COM9
+ROVER_RADIO_PORT = "/dev/ttyUSB2"    # Windows example: COM11
 
-# Ubuntu örnek:
+# Ubuntu example:
 # ROVER_GPS_PORT = "/dev/ttyUSB0"
 # ROVER_RADIO_PORT = "/dev/ttyUSB1"
 
@@ -42,13 +42,13 @@ SERIAL_TIMEOUT = 0.05
 
 
 # =======================================================
-# 2) ROVER STATUS AYARI
+# 2) ROVER STATUS SETTINGS
 # =======================================================
 
 SEND_STATUS_TO_BASE = False
-STATUS_SEND_INTERVAL = 1.0    # saniye
+STATUS_SEND_INTERVAL = 1.0    # seconds
 
-PRINT_INTERVAL = 1.0          # saniye
+PRINT_INTERVAL = 1.0          # seconds
 
 
 # =======================================================
@@ -57,7 +57,7 @@ PRINT_INTERVAL = 1.0          # saniye
 
 def crc24q(data: bytes) -> int:
     """
-    RTCM3 CRC24Q hesabı.
+    RTCM3 CRC24Q calculation.
     Polynomial: 0x1864CFB
     """
     crc = 0
@@ -73,7 +73,7 @@ def crc24q(data: bytes) -> int:
 
 def rtcm_message_type(frame: bytes) -> int:
     """
-    RTCM message type ilk 12 bittir.
+    RTCM message type is the first 12 bits.
     """
     payload = frame[3:-3]
     if len(payload) < 2:
@@ -83,7 +83,7 @@ def rtcm_message_type(frame: bytes) -> int:
 
 def extract_rtcm3_frames(buffer: bytearray):
     """
-    Buffer içinden geçerli RTCM3 frame'lerini çıkarır.
+    Extracts valid RTCM3 frames from buffer.
     RTCM3 frame:
         0xD3 | length 10-bit | payload | CRC24Q 3-byte
     """
@@ -98,7 +98,7 @@ def extract_rtcm3_frames(buffer: bytearray):
         if len(buffer) - start < 3:
             return bytearray(buffer[start:]), frames
 
-        # RTCM header'da 2. byte'ın üst 6 biti reserved = 0 olmalı.
+        # Upper 6 bits of 2nd byte in RTCM header must be reserved = 0.
         if buffer[start + 1] & 0xFC:
             buffer = buffer[start + 1:]
             continue
@@ -122,7 +122,7 @@ def extract_rtcm3_frames(buffer: bytearray):
             frames.append(frame)
             buffer = buffer[start + total_len:]
         else:
-            # Yanlış D3 yakalandıysa bir byte ilerle.
+            # If wrong D3 caught, advance by one byte.
             buffer = buffer[start + 1:]
 
 
@@ -132,10 +132,10 @@ def extract_rtcm3_frames(buffer: bytearray):
 
 def nmea2dec(coord: str, direction: str) -> float:
     """
-    NMEA DDMM.MMMMM / DDDMM.MMMMM formatını decimal dereceye çevirir.
+    Converts NMEA DDMM.MMMMM / DDDMM.MMMMM format to decimal degrees.
     """
     if not coord:
-        raise ValueError("Boş koordinat")
+        raise ValueError("Empty coordinate")
 
     dot = coord.index(".")
     deg = float(coord[:dot - 2])
@@ -150,9 +150,9 @@ def nmea2dec(coord: str, direction: str) -> float:
 
 def parse_gga(line: str):
     """
-    GGA satırını parse eder.
+    Parses GGA line.
 
-    Örnek:
+    Example:
     $GNGGA,time,lat,N,lon,E,quality,sats,hdop,alt,M,geoid,M,diff_age,diff_station*CS
     """
     if "GGA," not in line:
@@ -211,11 +211,11 @@ def fix_name(quality: str) -> str:
 
 
 # =======================================================
-# 5) RADIO -> ROVER GPS RTCM AKTARIMI
+# 5) RADIO -> ROVER GPS RTCM TRANSFER
 # =======================================================
 
 def radio_to_gps_rtcm(radio_ser: serial.Serial, gps_ser: serial.Serial, stop_event: threading.Event):
-    print("[AKTARIM] Radio -> Rover GPS RTCM başladı.")
+    print("[TRANSFER] Radio -> Rover GPS RTCM started.")
 
     buffer = bytearray()
     last_report = time.time()
@@ -247,7 +247,7 @@ def radio_to_gps_rtcm(radio_ser: serial.Serial, gps_ser: serial.Serial, stop_eve
                     )
                     print(f"[ROVER RTCM RX] {byte_count} byte/s | {frame_count} frame/s | msg: {top_msgs}")
                 else:
-                    print("[ROVER RTCM RX] RTCM yok. RF link veya Base çıkışı kontrol et.")
+                    print("[ROVER RTCM RX] No RTCM. Check RF link or Base output.")
 
                 byte_count = 0
                 frame_count = 0
@@ -255,7 +255,7 @@ def radio_to_gps_rtcm(radio_ser: serial.Serial, gps_ser: serial.Serial, stop_eve
                 last_report = now
 
         except Exception as e:
-            print(f"[HATA] Radio -> GPS RTCM aktarım hatası: {e}")
+            print(f"[ERROR] Radio -> GPS RTCM transfer error: {e}")
             time.sleep(0.2)
 
 
@@ -264,7 +264,7 @@ def radio_to_gps_rtcm(radio_ser: serial.Serial, gps_ser: serial.Serial, stop_eve
 # =======================================================
 
 def monitor_rover_gps(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_event: threading.Event):
-    print("[DINLEME] Rover GPS GGA dinleme başladı.")
+    print("[LISTENING] Rover GPS GGA listening started.")
 
     last_print = 0.0
     last_status_send = 0.0
@@ -299,7 +299,7 @@ def monitor_rover_gps(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_eve
             now = time.time()
 
             # -------------------------------
-            # 1) Ekrana basma
+            # 1) Print to screen
             # -------------------------------
             if now - last_print >= PRINT_INTERVAL:
                 if lat is not None and lon is not None:
@@ -320,13 +320,13 @@ def monitor_rover_gps(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_eve
                     print(
                         "\n"
                         f"[GGA] fix={fix} | q={quality} | "
-                        f"sats={sats} | hdop={hdop} | GPS fix bekleniyor..."
+                        f"sats={sats} | hdop={hdop} | Waiting for GPS fix..."
                     )
 
                 last_print = now
 
             # -------------------------------
-            # 2) Base'e kısa status gönderme
+            # 2) Send short status to Base
             # -------------------------------
             if SEND_STATUS_TO_BASE and now - last_status_send >= STATUS_SEND_INTERVAL:
                 try:
@@ -360,10 +360,10 @@ def monitor_rover_gps(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_eve
                     last_status_send = now
 
                 except Exception as e:
-                    print(f"[HATA] Rover status gönderilemedi: {e}")
+                    print(f"[ERROR] Failed to send Rover status: {e}")
 
         except Exception as e:
-            print(f"[HATA] Rover GPS monitor hatası: {e}")
+            print(f"[ERROR] Rover GPS monitor error: {e}")
             time.sleep(0.2)
 
 
@@ -372,7 +372,7 @@ def monitor_rover_gps(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_eve
 # =======================================================
 
 def main():
-    print("=== 3DR SiK -> LC29HEA ROVER RTCM AKTARIM ===")
+    print("=== 3DR SiK -> LC29HEA ROVER RTCM TRANSFER ===")
 
     try:
         gps_ser = serial.Serial(
@@ -394,11 +394,11 @@ def main():
         radio_ser.reset_input_buffer()
         radio_ser.reset_output_buffer()
 
-        print(f"[OK] Rover GPS bağlandı: {ROVER_GPS_PORT} @ {GPS_BAUD}")
-        print(f"[OK] Rover Radio bağlandı: {ROVER_RADIO_PORT} @ {RADIO_BAUD}")
+        print(f"[OK] Rover GPS connected: {ROVER_GPS_PORT} @ {GPS_BAUD}")
+        print(f"[OK] Rover Radio connected: {ROVER_RADIO_PORT} @ {RADIO_BAUD}")
 
     except Exception as e:
-        print(f"[BAGLANTI HATASI] {e}")
+        print(f"[CONNECTION ERROR] {e}")
         return
 
     stop_event = threading.Event()
@@ -423,14 +423,14 @@ def main():
             time.sleep(1)
 
     except KeyboardInterrupt:
-        print("\n[CIKIS] Program durduruluyor...")
+        print("\n[EXIT] Program stopping...")
 
     finally:
         stop_event.set()
         time.sleep(0.3)
         gps_ser.close()
         radio_ser.close()
-        print("[CIKIS] Seri portlar kapatıldı.")
+        print("[EXIT] Serial ports closed.")
 
 
 if __name__ == "__main__":

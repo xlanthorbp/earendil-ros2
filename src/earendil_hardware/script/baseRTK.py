@@ -2,20 +2,20 @@
 # -*- coding: utf-8 -*-
 
 """
-BASE TARAFI
+BASE SIDE
 
 LC29HEA Base GPS -> 3DR SiK Telemetry Radio -> Rover
 
-Görev:
-1. Base LC29HEA'yı base moduna alır.
-2. Survey-in veya fixed ECEF base konumu ayarlar.
-3. GPS'ten gelen RTCM3 paketlerini ayıklar.
-4. Sadece geçerli RTCM3 frame'lerini 3DR radyoya gönderir.
-5. Rover'dan gelen kısa durum mesajlarını ekrana basar.
+Task:
+1. Puts Base LC29HEA into base mode.
+2. Sets Survey-in or fixed ECEF base position.
+3. Extracts RTCM3 packets coming from GPS.
+4. Sends only valid RTCM3 frames to 3DR radio.
+5. Prints short status messages coming from Rover to screen.
 
-Not:
-- 3DR SiK radyo ayarlarında MAVLINK=0 önerilir.
-- İki radyoda NETID, baud ve air speed aynı olmalıdır.
+Note:
+- MAVLINK=0 is recommended in 3DR SiK radio settings.
+- NETID, baud and air speed must be the same on both radios.
 """
 
 import serial
@@ -25,13 +25,13 @@ from collections import Counter
 
 
 # =======================================================
-# 1) PORT VE BAUD AYARLARI
+# 1) PORT AND BAUD SETTINGS
 # =======================================================
 
-BASE_GPS_PORT = "/dev/ttyUSB0"       # Windows örnek: COM8
-BASE_RADIO_PORT = "/dev/ttyUSB1"    # Windows örnek: COM12
+BASE_GPS_PORT = "/dev/ttyUSB0"       # Windows example: COM8
+BASE_RADIO_PORT = "/dev/ttyUSB1"    # Windows example: COM12
 
-# Ubuntu örnek:
+# Ubuntu example:
 # BASE_GPS_PORT = "/dev/ttyUSB0"
 # BASE_RADIO_PORT = "/dev/ttyUSB1"
 
@@ -42,39 +42,39 @@ SERIAL_TIMEOUT = 0.05
 
 
 # =======================================================
-# 2) BASE KONFİGÜRASYONU
+# 2) BASE CONFIGURATION
 # =======================================================
 
 CONFIGURE_BASE_ON_START = True
 
-# "survey_in" veya "fixed_ecef"
-# Base anteni her kurulumda farklı noktaya konuyorsa survey_in kullanılmalı.
+# "survey_in" or "fixed_ecef"
+# If base antenna is placed at a different location on each setup, survey_in should be used.
 BASE_POSITION_MODE = "survey_in"
 
-# Survey-in ayarı
-# Bu sürümde sistem açılışta 5 dakika base konumunu ortalar,
-# ardından RTCM aktarım thread'lerini başlatır.
-SURVEY_IN_MIN_SEC = 400   # 5 dakika
-SURVEY_IN_ACC_M = 0.5        # hedef survey-in doğruluğu: 0.5 m
+# Survey-in setting
+# In this version, the system averages the base position for 5 minutes on startup,
+# then starts RTCM transmission threads.
+SURVEY_IN_MIN_SEC = 400   # 5 minutes
+SURVEY_IN_ACC_M = 0.5        # target survey-in accuracy: 0.5 m
 WAIT_SURVEY_IN_BEFORE_RTCM = True
 SURVEY_IN_EXTRA_WAIT_SEC = 10
 
-# Fixed ECEF kullanacaksan bunları doldur.
-# Değerler metre cinsinden WGS84 ECEF X/Y/Z olmalı.
+# If you use Fixed ECEF, fill these.
+# Values must be WGS84 ECEF X/Y/Z in meters.
 FIXED_ECEF_X = 0.0
 FIXED_ECEF_Y = 0.0
 FIXED_ECEF_Z = 0.0
 
-# RTCM mesajlarını açma
+# Enabling RTCM messages
 ENABLE_RTCM_1005 = True
 ENABLE_RTCM_MSM = True
 
-# Eğer RF bandwidth yetmezse MSM7 yerine alıcının default MSM4 ayarı daha stabil olabilir.
-# Şimdilik senin eski kodundaki PAIR432 ve PAIR434 mantığını koruyoruz.
+# If RF bandwidth is not enough, receiver's default MSM4 setting might be more stable than MSM7.
+# For now, we are keeping the PAIR432 and PAIR434 logic from your old code.
 
 
 # =======================================================
-# 3) NMEA / QUECTEL KOMUT CHECKSUM
+# 3) NMEA / QUECTEL COMMAND CHECKSUM
 # =======================================================
 
 def checksum(nmea_body: str) -> str:
@@ -86,10 +86,10 @@ def checksum(nmea_body: str) -> str:
 
 def send_cmd(ser: serial.Serial, raw_cmd: str, wait: float = 0.25) -> None:
     """
-    Quectel/LC29H komutunu checksum'lı gönderir.
-    Örnek input:
+    Sends Quectel/LC29H command with checksum.
+    Example input:
         PQTMCFGRCVRMODE,W,2
-    Gönderilen:
+    Sent:
         $PQTMCFGRCVRMODE,W,2*CS\\r\\n
     """
     body = raw_cmd.replace("$", "").split("*")[0]
@@ -107,15 +107,15 @@ def send_cmd(ser: serial.Serial, raw_cmd: str, wait: float = 0.25) -> None:
     try:
         resp = ser.read_all().decode("ascii", errors="ignore").strip()
         if resp:
-            print(f"[GPS CEVAP] {resp}")
+            print(f"[GPS RESPONSE] {resp}")
         else:
-            print(f"[GPS CEVAP YOK] {body}")
+            print(f"[NO GPS RESPONSE] {body}")
     except Exception as e:
-        print(f"[GPS CEVAP OKUMA HATASI] {e}")
+        print(f"[GPS RESPONSE READ ERROR] {e}")
 
 
 def configure_base_gps(gps_ser: serial.Serial) -> None:
-    print("\n=== Base GPS konfigürasyonu başlıyor ===")
+    print("\n=== Base GPS configuration starting ===")
 
     # 1) Base station mode
     send_cmd(gps_ser, "PQTMCFGRCVRMODE,W,2")
@@ -124,27 +124,27 @@ def configure_base_gps(gps_ser: serial.Serial) -> None:
     if BASE_POSITION_MODE == "survey_in":
         cmd = f"PQTMCFGSVIN,W,1,{SURVEY_IN_MIN_SEC},{SURVEY_IN_ACC_M},0,0,0"
         send_cmd(gps_ser, cmd)
-        print(f"[BASE MODE] Survey-in aktif: {SURVEY_IN_MIN_SEC}s, hedef doğruluk {SURVEY_IN_ACC_M}m")
+        print(f"[BASE MODE] Survey-in active: {SURVEY_IN_MIN_SEC}s, target accuracy {SURVEY_IN_ACC_M}m")
 
     elif BASE_POSITION_MODE == "fixed_ecef":
         if FIXED_ECEF_X == 0.0 and FIXED_ECEF_Y == 0.0 and FIXED_ECEF_Z == 0.0:
-            print("[UYARI] fixed_ecef seçili ama ECEF değerleri 0.0. Bu doğru değildir.")
+            print("[WARNING] fixed_ecef selected but ECEF values are 0.0. This is not correct.")
         cmd = f"PQTMCFGSVIN,W,2,0,0,{FIXED_ECEF_X},{FIXED_ECEF_Y},{FIXED_ECEF_Z}"
         send_cmd(gps_ser, cmd)
-        print("[BASE MODE] Fixed ECEF aktif.")
+        print("[BASE MODE] Fixed ECEF active.")
 
     else:
-        print("[UYARI] BASE_POSITION_MODE hatalı. Survey-in/fixed_ecef dışında değer girilmiş.")
+        print("[WARNING] Invalid BASE_POSITION_MODE. A value other than Survey-in/fixed_ecef was entered.")
 
-    # 3) RTCM 1005 aç
+    # 3) Enable RTCM 1005
     if ENABLE_RTCM_1005:
         send_cmd(gps_ser, "PAIR434,1")
 
-    # 4) RTCM MSM aç
+    # 4) Enable RTCM MSM
     if ENABLE_RTCM_MSM:
         send_cmd(gps_ser, "PAIR432,1")
 
-    print("=== Base GPS konfigürasyonu bitti ===\n")
+    print("=== Base GPS configuration finished ===\n")
 
 
 # =======================================================
@@ -153,7 +153,7 @@ def configure_base_gps(gps_ser: serial.Serial) -> None:
 
 def crc24q(data: bytes) -> int:
     """
-    RTCM3 CRC24Q hesabı.
+    RTCM3 CRC24Q calculation.
     Polynomial: 0x1864CFB
     """
     crc = 0
@@ -169,7 +169,7 @@ def crc24q(data: bytes) -> int:
 
 def rtcm_message_type(frame: bytes) -> int:
     """
-    RTCM message type ilk 12 bittir.
+    RTCM message type is the first 12 bits.
     """
     payload = frame[3:-3]
     if len(payload) < 2:
@@ -179,7 +179,7 @@ def rtcm_message_type(frame: bytes) -> int:
 
 def extract_rtcm3_frames(buffer: bytearray):
     """
-    Buffer içinden geçerli RTCM3 frame'lerini çıkarır.
+    Extracts valid RTCM3 frames from buffer.
     RTCM3 frame:
         0xD3 | length 10-bit | payload | CRC24Q 3-byte
     """
@@ -194,7 +194,7 @@ def extract_rtcm3_frames(buffer: bytearray):
         if len(buffer) - start < 3:
             return bytearray(buffer[start:]), frames
 
-        # RTCM header'da 2. byte'ın üst 6 biti reserved = 0 olmalı.
+        # Upper 6 bits of 2nd byte in RTCM header must be reserved = 0.
         if buffer[start + 1] & 0xFC:
             buffer = buffer[start + 1:]
             continue
@@ -218,16 +218,16 @@ def extract_rtcm3_frames(buffer: bytearray):
             frames.append(frame)
             buffer = buffer[start + total_len:]
         else:
-            # Yanlış D3 yakalandıysa bir byte ilerle.
+            # If wrong D3 caught, advance by one byte.
             buffer = buffer[start + 1:]
 
 
 # =======================================================
-# 5) BASE GPS -> RADIO RTCM AKTARIMI
+# 5) BASE GPS -> RADIO RTCM TRANSFER
 # =======================================================
 
 def gps_to_radio_rtcm(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_event: threading.Event):
-    print("[AKTARIM] Base GPS -> Radio RTCM başladı.")
+    print("[TRANSFER] Base GPS -> Radio RTCM started.")
 
     buffer = bytearray()
     last_report = time.time()
@@ -259,7 +259,7 @@ def gps_to_radio_rtcm(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_eve
                     )
                     print(f"[BASE TX] {byte_count} byte/s | {frame_count} frame/s | msg: {top_msgs}")
                 else:
-                    print("[BASE TX] RTCM yok. Base GPS RTCM üretiyor mu kontrol et.")
+                    print("[BASE TX] No RTCM. Check if Base GPS is producing RTCM.")
 
                 byte_count = 0
                 frame_count = 0
@@ -267,16 +267,16 @@ def gps_to_radio_rtcm(gps_ser: serial.Serial, radio_ser: serial.Serial, stop_eve
                 last_report = now
 
         except Exception as e:
-            print(f"[HATA] GPS -> Radio RTCM aktarım hatası: {e}")
+            print(f"[ERROR] GPS -> Radio RTCM transfer error: {e}")
             time.sleep(0.2)
 
 
 # =======================================================
-# 6) ROVER -> BASE DURUM MESAJI OKUMA
+# 6) ROVER -> BASE STATUS MESSAGE READING
 # =======================================================
 
 def radio_to_console(radio_ser: serial.Serial, stop_event: threading.Event):
-    print("[DINLEME] Rover durum mesajı dinleme başladı.")
+    print("[LISTENING] Rover status message listening started.")
 
     buffer = ""
 
@@ -293,7 +293,7 @@ def radio_to_console(radio_ser: serial.Serial, stop_event: threading.Event):
 
             buffer += text
 
-            # Buffer şişmesin.
+            # Prevent buffer bloat.
             if len(buffer) > 3000:
                 buffer = buffer[-1500:]
 
@@ -310,7 +310,7 @@ def radio_to_console(radio_ser: serial.Serial, stop_event: threading.Event):
                     print(f"[RADIO RX] {line}")
 
         except Exception as e:
-            print(f"[HATA] Radio console okuma hatası: {e}")
+            print(f"[ERROR] Radio console read error: {e}")
             time.sleep(0.2)
 
 
@@ -319,7 +319,7 @@ def radio_to_console(radio_ser: serial.Serial, stop_event: threading.Event):
 # =======================================================
 
 def main():
-    print("=== LC29HEA BASE -> 3DR SiK RTCM AKTARIM ===")
+    print("=== LC29HEA BASE -> 3DR SiK RTCM TRANSFER ===")
 
     try:
         gps_ser = serial.Serial(
@@ -341,11 +341,11 @@ def main():
         radio_ser.reset_input_buffer()
         radio_ser.reset_output_buffer()
 
-        print(f"[OK] Base GPS bağlandı: {BASE_GPS_PORT} @ {GPS_BAUD}")
-        print(f"[OK] Base Radio bağlandı: {BASE_RADIO_PORT} @ {RADIO_BAUD}")
+        print(f"[OK] Base GPS connected: {BASE_GPS_PORT} @ {GPS_BAUD}")
+        print(f"[OK] Base Radio connected: {BASE_RADIO_PORT} @ {RADIO_BAUD}")
 
     except Exception as e:
-        print(f"[BAGLANTI HATASI] {e}")
+        print(f"[CONNECTION ERROR] {e}")
         return
 
     if CONFIGURE_BASE_ON_START:
@@ -353,13 +353,13 @@ def main():
 
         if BASE_POSITION_MODE == "survey_in" and WAIT_SURVEY_IN_BEFORE_RTCM:
             wait_sec = SURVEY_IN_MIN_SEC + SURVEY_IN_EXTRA_WAIT_SEC
-            print(f"[BEKLEME] Survey-in için {SURVEY_IN_MIN_SEC} saniye bekleniyor.")
-            print("[UYARI] Bu sürede base antenini kesinlikle oynatma.")
-            print("[INFO] Bekleme bitince RTCM aktarımı otomatik başlayacak.")
+            print(f"[WAITING] Waiting {SURVEY_IN_MIN_SEC} seconds for Survey-in.")
+            print("[WARNING] Absolutely do not move the base antenna during this time.")
+            print("[INFO] RTCM transfer will automatically start when waiting is over.")
             time.sleep(wait_sec)
-            print("[OK] Survey-in bekleme süresi tamamlandı. RTCM aktarımı başlatılıyor.")
+            print("[OK] Survey-in waiting time completed. RTCM transfer starting.")
     else:
-        print("[INFO] Base GPS konfigürasyonu atlandı.")
+        print("[INFO] Base GPS configuration skipped.")
 
     stop_event = threading.Event()
 
@@ -383,14 +383,14 @@ def main():
             time.sleep(1)
 
     except KeyboardInterrupt:
-        print("\n[CIKIS] Program durduruluyor...")
+        print("\n[EXIT] Program stopping...")
 
     finally:
         stop_event.set()
         time.sleep(0.3)
         gps_ser.close()
         radio_ser.close()
-        print("[CIKIS] Seri portlar kapatıldı.")
+        print("[EXIT] Serial ports closed.")
 
 
 if __name__ == "__main__":

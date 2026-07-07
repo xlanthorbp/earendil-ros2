@@ -183,7 +183,7 @@ class RtkNode(Node):
                     self.fix_pub.publish(msg)
                     
                     # Log information to terminal every 2 seconds for the user
-                    now = time.time()
+                    now = self.get_clock().now().nanoseconds / 1e9
                     if not hasattr(self, 'last_log_time') or (now - self.last_log_time) >= 2.0:
                         self.get_logger().info(f"[GPS] Status: {fix_str} | Lat: {gga['lat']:.7f} | Lon: {gga['lon']:.7f} | Alt: {gga['altitude']}m")
                         self.last_log_time = now

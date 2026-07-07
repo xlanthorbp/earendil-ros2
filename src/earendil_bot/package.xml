@@ -14,10 +14,7 @@
   <depend>nav_msgs</depend>
   <depend>tf2_ros</depend>
 
-  <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>xacro</exec_depend>
   <exec_depend>twist_mux</exec_depend>
-  <exec_depend>robot_localization</exec_depend>
 
   <!-- For simple_motor_bridge.py (import serial) -->
   <exec_depend>python3-serial</exec_depend> 

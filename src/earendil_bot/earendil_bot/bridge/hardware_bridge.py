@@ -13,7 +13,7 @@ from rclpy.node import Node
 import serial
 
 from geometry_msgs.msg import Twist, TransformStamped
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, Range
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32, String
 from tf2_ros import TransformBroadcaster
@@ -35,6 +35,7 @@ class HardwareBridgeNode(Node):
         self.declare_parameter('wheel_separation', 0.160)
         self.declare_parameter('ticks_per_rev', 341.2)
         self.declare_parameter('heading_offset', 0.0)
+        self.declare_parameter('ir_height', 1.0)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
@@ -45,12 +46,13 @@ class HardwareBridgeNode(Node):
         self.wheel_separation = self.get_parameter('wheel_separation').value
         self.ticks_per_rev = self.get_parameter('ticks_per_rev').value
         self.heading_offset = self.get_parameter('heading_offset').value
+        self.ir_height = self.get_parameter('ir_height').value
 
         # ---------------------------------------------------------
         # State Variables
         # ---------------------------------------------------------
         self.last_cmd = None
-        self.last_cmd_time = time.time()
+        self.last_cmd_time = self.get_clock().now().nanoseconds / 1e9
         self.serial_buffer = ""
         self.buffer_lock = threading.Lock()
         
@@ -89,6 +91,7 @@ class HardwareBridgeNode(Node):
         self.mag_pub = self.create_publisher(Float32, '/mag/heading', 10)
         self.imu_pub = self.create_publisher(Imu, '/imu/data', 10)
         self.imu_raw_pub = self.create_publisher(Imu, '/imu/data_raw', 10)
+        self.ir_pub = self.create_publisher(Range, '/ir_top', 10)
         self.raw_pub = self.create_publisher(String, '/arduino/raw_line', 10)
         
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -140,10 +143,10 @@ class HardwareBridgeNode(Node):
         if cmd != self.last_cmd:
             self._send_raw(cmd)
             self.last_cmd = cmd
-            self.last_cmd_time = time.time()
+            self.last_cmd_time = self.get_clock().now().nanoseconds / 1e9
             self.get_logger().info(f"Command Sent: {cmd}")
         else:
-            self.last_cmd_time = time.time()
+            self.last_cmd_time = self.get_clock().now().nanoseconds / 1e9
 
     def _velocity_to_pwm(self, vel, max_vel=1.0):
         vel = min(abs(vel), max_vel)
@@ -152,7 +155,7 @@ class HardwareBridgeNode(Node):
 
     def _keepalive(self):
         if self.last_cmd and self.last_cmd != "MOTOR:STOP":
-            if time.time() - self.last_cmd_time > 1.0:
+            if (self.get_clock().now().nanoseconds / 1e9) - self.last_cmd_time > 1.0:
                 self.last_cmd = "MOTOR:STOP"
                 if self.ser:
                     self._send_raw(self.last_cmd)
@@ -161,7 +164,7 @@ class HardwareBridgeNode(Node):
                 self._send_raw(self.last_cmd)
 
     def _sensor_watchdog(self):
-        current_time = time.time()
+        current_time = self.get_clock().now().nanoseconds / 1e9
         
         # Check Encoder
         if self.enc_active and (current_time - self.last_enc_time > 2.0):
@@ -224,6 +227,8 @@ class HardwareBridgeNode(Node):
                             self._parse_mag(line)
                         elif line.startswith("IMU,"):
                             self._parse_imu(line)
+                        elif line.startswith("IR,"):
+                            self._parse_ir(line)
                         elif line.startswith("WARN,"):
                             self.get_logger().warn(f"Arduino: {line}")
                         elif line.startswith("ERR,"):
@@ -240,9 +245,30 @@ class HardwareBridgeNode(Node):
     # ==================================================
     # SENSOR PARSERS
     # ==================================================
+    def _parse_ir(self, line):
+        # Expected Format: IR,time_ms,distance_cm
+        try:
+            parts = line.split(',')
+            if len(parts) >= 3:
+                raw_dist_cm = float(parts[2])
+                dist = (raw_dist_cm / 100.0) + self.ir_height if raw_dist_cm != -1.0 else -1.0
+                
+                msg = Range()
+                msg.header.stamp = self.get_clock().now().to_msg()
+                msg.header.frame_id = 'ir_top_link'
+                msg.radiation_type = Range.INFRARED
+                msg.field_of_view = 0.05
+                msg.min_range = 0.35
+                msg.max_range = 1.49
+                msg.range = dist if dist > 0 else -1.0
+                
+                self.ir_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Failed to parse IR: {e}")
+
     def _parse_encoder(self, line):
         # Expected Format: ENC,left_ticks,right_ticks,dt_ms
-        self.last_enc_time = time.time()
+        self.last_enc_time = self.get_clock().now().nanoseconds / 1e9
         if not self.enc_active:
             self.enc_active = True
             self.get_logger().info("Encoder data stream established/restored.")
@@ -323,7 +349,7 @@ class HardwareBridgeNode(Node):
 
     def _parse_mag(self, line):
         # Expected Format: MAG,time_ms,heading,...
-        self.last_mag_time = time.time()
+        self.last_mag_time = self.get_clock().now().nanoseconds / 1e9
         if not self.mag_active:
             self.mag_active = True
             self.get_logger().info("Magnetometer data stream established/restored.")
@@ -350,7 +376,7 @@ class HardwareBridgeNode(Node):
             
     def _parse_imu(self, line):
         # Expected Format: IMU,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z
-        self.last_imu_time = time.time()
+        self.last_imu_time = self.get_clock().now().nanoseconds / 1e9
         if not self.imu_active:
             self.imu_active = True
             self.get_logger().info("IMU data stream established/restored.")

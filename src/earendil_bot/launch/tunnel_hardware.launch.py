@@ -28,7 +28,7 @@ def generate_launch_description():
                 {'product_name': 'LDLiDAR_STL27L'},
                 {'topic_name': 'scan'},
                 {'frame_id': 'base_laser'},
-                {'laser_scan_dir': False},
+                {'laser_scan_dir': True},
                 {'enable_angle_crop_func': False},
                 {'angle_crop_min': 0.0},
                 {'angle_crop_max': 0.0}
@@ -43,14 +43,7 @@ def generate_launch_description():
             arguments=['0','0','0.18','0','0','0','base_link','base_laser']
         ),
         
-        # 2. Start SHARP Infrared Sensor Bridge
-        Node(
-            package='earendil_bot',
-            executable='ir_bridge',
-            name='ir_bridge',
-            output='screen',
-            parameters=[hardware_params]
-        ),
+        # (IR Bridge has been merged into hardware_bridge)
         
         # 3. Motor Control (Hardware Bridge)
         # Assuming hardware_bridge is your main motor controller from Arduino

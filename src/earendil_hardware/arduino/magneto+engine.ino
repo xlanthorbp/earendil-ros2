@@ -34,6 +34,7 @@
 #define HMC5883_ADDR 0x1E
 
 #define SERIAL_BAUD 115200
+#define IR_SENSOR_PIN A3
 
 #define TELEMETRY_INTERVAL_MS 100
 #define SAMPLE_COUNT 8
@@ -149,6 +150,7 @@ float headingOffsetDeg = HEADING_OFFSET_DEFAULT;
 bool telemetryEnabled = true;
 
 unsigned long lastTelemetryMs = 0;
+unsigned long lastIrTelemetryMs = 0;
 unsigned long lastMotorCommandMs = 0;
 
 String motorMode = "STOP";
@@ -506,6 +508,42 @@ void publishMagTelemetry() {
   Serial.print(currentMotorPwm);
 
   Serial.println();
+}
+
+void publishIRTelemetry() {
+  if (!telemetryEnabled) {
+    return;
+  }
+
+  unsigned long now = millis();
+
+  if (now - lastIrTelemetryMs < TELEMETRY_INTERVAL_MS) {
+    return;
+  }
+
+  lastIrTelemetryMs = now;
+
+  long sum = 0;
+  for (int i = 0; i < 25; i++) {
+    sum += analogRead(IR_SENSOR_PIN);
+    delay(2);
+  }
+
+  float raw = sum / 25.0;
+  float voltage = raw * 5.0 / 1023.0;
+
+  // GP2Y0A02YK0F için yaklaşık denklem
+  float distance_cm = 60.0 * pow(voltage, -1.16);
+
+  // Mesafe limiti: Sensörün düzgün okuma aralığı dışındaysa -1 olarak kabul edilir.
+  if (distance_cm < 20 || distance_cm > 150) {
+    distance_cm = -1.0;
+  }
+
+  Serial.print("IR,");
+  Serial.print(now);
+  Serial.print(",");
+  Serial.println(distance_cm, 1);
 }
 
 void printHeadingDebug() {
@@ -950,6 +988,8 @@ void setup() {
   Wire.begin();
   Wire.setClock(100000);
 
+  pinMode(IR_SENSOR_PIN, INPUT);
+
   pinMode(L_RPWM, OUTPUT);
   pinMode(L_LPWM, OUTPUT);
   pinMode(L_REN, OUTPUT);
@@ -1008,4 +1048,5 @@ void loop() {
   handleSerialInput();
   checkMotorWatchdog();
   publishMagTelemetry();
+  publishIRTelemetry();
 }

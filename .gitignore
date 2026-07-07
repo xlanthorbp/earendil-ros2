@@ -4,7 +4,7 @@ install/
 log/
 *.log
 *.json
-dormant/
+_dormant/
 
 # MATLAB/Simulink
 *.asv

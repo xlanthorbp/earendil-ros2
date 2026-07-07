@@ -15,10 +15,10 @@ except ImportError:
     Picamera2 = None
 
 # =========================
-# AYARLAR
+# SETTINGS
 # =========================
 TAG_SIZE_M = 0.20  # 20x20 cm ArUco tag
-HFOV_DEG = 83.0   # IMX219-83 yaklaşık yatay görüş açısı
+HFOV_DEG = 83.0   # IMX219-83 approximate horizontal FOV
 
 
 class RPI_Camera:
@@ -44,7 +44,7 @@ class RPI_Camera:
         if frame is None:
             return False, None
 
-        # Picamera2 RGB verir, OpenCV BGR ister.
+        # Picamera2 outputs RGB, OpenCV expects BGR.
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         return True, frame
@@ -63,16 +63,16 @@ class ArucoDetectorNode(Node):
         try:
             self.cap = RPI_Camera()
         except Exception as e:
-            self.get_logger().error(f"Kamera baslatilamadi: {e}")
+            self.get_logger().error(f"Failed to start camera: {e}")
             self.cap = None
 
         if self.cap:
-            # Ilk frame'i okuyup parametreleri hazirla
+            # Read the first frame and prepare parameters
             ret, frame = self.cap.read()
             if not ret:
-                self.get_logger().error("Kamera acildi ama ilk frame alinamadi.")
+                self.get_logger().error("Camera opened but failed to get the first frame.")
             else:
-                self.get_logger().info(f"Kamera calisiyor. Boyut: {frame.shape}")
+                self.get_logger().info(f"Camera is running. Size: {frame.shape}")
                 self.IMAGE_H, self.IMAGE_W = frame.shape[:2]
                 
                 self.fx = (self.IMAGE_W / 2) / math.tan(math.radians(HFOV_DEG / 2))
@@ -80,7 +80,7 @@ class ArucoDetectorNode(Node):
                 self.cx = self.IMAGE_W / 2
                 self.cy = self.IMAGE_H / 2
                 
-                # ArUco ayarlari
+                # ArUco settings
                 if hasattr(cv2.aruco, "getPredefinedDictionary"):
                     self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
                 else:
@@ -91,7 +91,7 @@ class ArucoDetectorNode(Node):
                 else:
                     self.aruco_params = cv2.aruco.DetectorParameters_create()
                     
-                # Timer - saniyede 15 kere (15 Hz) cagir
+                # Timer - call 15 times a second (15 Hz)
                 self.timer = self.create_timer(1.0 / 15.0, self.process_frame)
 
     def marker_center(self, corners):
@@ -116,7 +116,7 @@ class ArucoDetectorNode(Node):
     def process_frame(self):
         ret, frame = self.cap.read()
         if not ret:
-            self.get_logger().warn("Kamera goruntusu alinamadi.", throttle_duration_sec=2.0)
+            self.get_logger().warn("Could not get camera frame.", throttle_duration_sec=2.0)
             return
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -150,7 +150,7 @@ class ArucoDetectorNode(Node):
                 })
 
             if len(detected_markers) >= 2:
-                # Soldan saga sirala
+                # Sort from left to right
                 detected_markers.sort(key=lambda m: m["center"][0])
                 tag1 = detected_markers[0]
                 tag2 = detected_markers[1]
@@ -167,13 +167,13 @@ class ArucoDetectorNode(Node):
                 angle_x_rad = math.atan2(mid_x, mid_z)
                 angle_x_deg = math.degrees(angle_x_rad)
                 
-                # Aruco gorunur oldu
+                # ArUco became visible
                 visible_msg.data = True
                 
-                # Aruco bilgilerini yayinla
-                # x -> Acisal sapma (angle_x_deg)
-                # y -> Kameraya olan X mesafesi (mid_x) - yatay öteleme
-                # z -> Ileriye olan Z mesafesi (mid_z)
+                # Publish ArUco information
+                # x -> Angular deviation (angle_x_deg)
+                # y -> X distance to camera (mid_x) - horizontal translation
+                # z -> Z distance forward (mid_z)
                 midpoint_msg = Point()
                 midpoint_msg.x = float(angle_x_deg)
                 midpoint_msg.y = float(mid_x) 
