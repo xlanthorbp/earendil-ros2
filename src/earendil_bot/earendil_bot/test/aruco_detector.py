@@ -4,15 +4,12 @@ from rclpy.node import Node
 from geometry_msgs.msg import Point
 from std_msgs.msg import Bool
 
+import subprocess
+import time
+
 import cv2
 import numpy as np
 import math
-
-# Picamera2 import wrapped in try-except in case it's run on a system without it for testing
-try:
-    from picamera2 import Picamera2
-except ImportError:
-    Picamera2 = None
 
 # =========================
 # SETTINGS
@@ -22,35 +19,53 @@ HFOV_DEG = 83.0   # IMX219-83 approximate horizontal FOV
 
 
 class RPI_Camera:
-    def __init__(self):
-        if Picamera2 is None:
-            raise ImportError("Picamera2 is not installed or not running on Raspberry Pi")
-            
-        self.picam2 = Picamera2()
-
-        config = self.picam2.create_preview_configuration(
-            main={
-                "size": (1280, 720),
-                "format": "RGB888"
-            }
+    """
+    Raspberry Pi 5 + IMX219 kamera için rpicam-vid tabanlı görüntü yakalama.
+    Ubuntu 24.04'teki libcamera (v0.2.0) PiSP desteklemediği için,
+    Pi Foundation'ın kendi rpicam-vid aracını subprocess olarak kullanıyoruz.
+    """
+    def __init__(self, width=1280, height=720, framerate=15):
+        self.width = width
+        self.height = height
+        # YUV420 frame boyutu: width * height * 1.5
+        self.frame_size = width * height * 3 // 2
+        
+        cmd = [
+            'rpicam-vid',
+            '-t', '0',              # Süresiz çalış
+            '--width', str(width),
+            '--height', str(height),
+            '--framerate', str(framerate),
+            '--codec', 'yuv420',     # Ham YUV420 formatı
+            '-n',                    # Önizleme penceresi açma
+            '-o', '-'                # stdout'a yaz
+        ]
+        
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=self.frame_size * 2
         )
-
-        self.picam2.configure(config)
-        self.picam2.start()
+        
+        # Kameranın ısınması için ilk birkaç kareyi bekle
+        time.sleep(0.5)
 
     def read(self):
-        frame = self.picam2.capture_array()
-
-        if frame is None:
+        try:
+            raw = self.process.stdout.read(self.frame_size)
+            if len(raw) != self.frame_size:
+                return False, None
+            yuv = np.frombuffer(raw, dtype=np.uint8).reshape((self.height * 3 // 2, self.width))
+            frame = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+            return True, frame
+        except Exception:
             return False, None
 
-        # Picamera2 outputs RGB, OpenCV expects BGR.
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-        return True, frame
-
     def release(self):
-        self.picam2.stop()
+        if self.process:
+            self.process.terminate()
+            self.process.wait()
 
 
 class ArucoDetectorNode(Node):
@@ -67,8 +82,15 @@ class ArucoDetectorNode(Node):
             self.cap = None
 
         if self.cap:
-            # Read the first frame and prepare parameters
-            ret, frame = self.cap.read()
+            # Görüntü gelene kadar birkaç kez okumayı dene (Kamera ısınma süresi)
+            ret = False
+            for _ in range(20):
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    break
+                import time
+                time.sleep(0.1)
+                
             if not ret:
                 self.get_logger().error("Camera opened but failed to get the first frame.")
             else:
@@ -80,16 +102,17 @@ class ArucoDetectorNode(Node):
                 self.cx = self.IMAGE_W / 2
                 self.cy = self.IMAGE_H / 2
                 
-                # ArUco settings
-                if hasattr(cv2.aruco, "getPredefinedDictionary"):
-                    self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
-                else:
+                # ArUco settings - Eski API'yi kullan (OpenCV < 4.7)
+                # Segfault'u önlemek için DetectorParameters() yerine DetectorParameters_create() kullanıyoruz
+                try:
                     self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL)
-
-                if hasattr(cv2.aruco, "DetectorParameters"):
-                    self.aruco_params = cv2.aruco.DetectorParameters()
-                else:
                     self.aruco_params = cv2.aruco.DetectorParameters_create()
+                except AttributeError:
+                    # Alternatif fallback (olur da farklı bir versiyonsa)
+                    self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
+                    self.aruco_params = cv2.aruco.DetectorParameters()
+                    
+                self.get_logger().info("ArUco detector initialized.")
                     
                 # Timer - call 15 times a second (15 Hz)
                 self.timer = self.create_timer(1.0 / 15.0, self.process_frame)

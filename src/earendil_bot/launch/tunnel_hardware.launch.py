@@ -63,5 +63,14 @@ def generate_launch_description():
             output='screen',
             remappings=[('/cmd_vel_out', '/cmd_vel')],
             parameters=[twist_mux_params, {'use_sim_time': False}]
+        ),
+
+        # 5. Aruco Ethernet Receiver Node
+        Node(
+            package='earendil_bot',
+            executable='aruco_receiver',
+            name='aruco_receiver',
+            output='screen',
+            parameters=[hardware_params]
         )
     ])

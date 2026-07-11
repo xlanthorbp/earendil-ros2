@@ -34,3 +34,11 @@ STL27L:
   ros__parameters:
     port_name: "/dev/ttyUSB0"
     port_baudrate: 921600
+
+# Aruco Ethernet Receiver Configuration
+aruco_receiver:
+  ros__parameters:
+    jetson_ip: "192.168.1.101"
+    port_recv: 5005
+    port_send: 5006
+    timeout: 1.5

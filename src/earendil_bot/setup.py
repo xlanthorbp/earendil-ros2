@@ -37,6 +37,10 @@ setup(
             'hardware_check = earendil_bot.hardware_check:main',
             'rtk_node = earendil_bot.gps.rtk_node:main',
             'lidar_motor_test = earendil_bot.test.lidar_motor_test:main',
+            'test1 = earendil_bot.test.test1:main',
+            'test2 = earendil_bot.test.test2:main',
+            'test3 = earendil_bot.test.test3:main',
+            'aruco_receiver = earendil_bot.test.aruco_receiver:main',
         ],
     },
 )
