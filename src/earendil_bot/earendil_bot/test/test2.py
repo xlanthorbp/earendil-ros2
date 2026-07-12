@@ -188,7 +188,15 @@ class Test2Node(Node):
                 self.tunnel_start_time = self.get_clock().now()
             else:
                 twist.linear.x = self.forward_speed_approach
-                twist.angular.z = 0.0
+                if self.aruco_visible:
+                    # Apply correction if deviation is more than 2.0 degrees (tolerance offset)
+                    if abs(self.aruco_angle) > 2.0:
+                        twist.angular.z = -self.kp_aruco * self.aruco_angle
+                        self.get_logger().info(f'Approaching Entrance - Correcting Heading: angle={self.aruco_angle:.1f}deg, cmd_z={twist.angular.z:.2f}', throttle_duration_sec=1.0)
+                    else:
+                        twist.angular.z = 0.0
+                else:
+                    twist.angular.z = 0.0
                 
         elif self.state == 'IN_TUNNEL':
             # Check if we exited the tunnel

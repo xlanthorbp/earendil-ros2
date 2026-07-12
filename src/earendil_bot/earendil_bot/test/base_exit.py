@@ -11,9 +11,9 @@ from sensor_msgs.msg import LaserScan, Imu
 from tf2_ros import Buffer, TransformListener, TransformException
 
 
-class IglooExitNode(Node):
+class BaseExitNode(Node):
     def __init__(self):
-        super().__init__('igloo_exit_node')
+        super().__init__('base_exit_node')
         
         # Parameters
         self.declare_parameter('forward_speed', 0.2)
@@ -38,7 +38,7 @@ class IglooExitNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         
-        self.get_logger().info('Igloo Exit Node Started. Driving forward...')
+        self.get_logger().info('Base Exit Node Started. Driving forward...')
         
     def imu_callback(self, msg: Imu):
         # Extract Yaw angle from Quaternion
@@ -149,7 +149,7 @@ class IglooExitNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = IglooExitNode()
+    node = BaseExitNode()
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, SystemExit):
