@@ -174,6 +174,7 @@ def pixel_to_camera_direction(u, v, z):
 while True:
     print("\n[IDLE] Raspberry Pi 5'ten START komutu bekleniyor...")
     active = False
+    pi_ip = None
     
     # Outer Loop: START paketini bekle
     while not active:
@@ -183,6 +184,7 @@ while True:
                 data, addr = sock_recv.recvfrom(1024)
                 cmd = data.decode('utf-8').strip()
                 if cmd == "START":
+                    pi_ip = addr[0]
                     print(f"[IDLE] START komutu alindi ({addr}). Kamera aciliyor...")
                     active = True
             except Exception as e:
@@ -332,7 +334,7 @@ while True:
         }
         try:
             payload = json.dumps(data_to_send).encode('utf-8')
-            sock_send.sendto(payload, (UDP_IP, UDP_PORT_SEND))
+            sock_send.sendto(payload, (pi_ip, UDP_PORT_SEND))
         except Exception as e:
             pass
 

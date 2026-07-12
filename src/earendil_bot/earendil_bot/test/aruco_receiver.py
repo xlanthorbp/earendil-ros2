@@ -111,6 +111,12 @@ class ArucoReceiverNode(Node):
                 midpoint_msg.z = float(distance)
                 self.midpoint_pub.publish(midpoint_msg)
                 
+                # Log packet details to terminal
+                self.get_logger().info(
+                    f"Parsed UDP packet -> visible: {visible}, angle: {angle:.2f} deg, dist: {distance:.2f} m",
+                    throttle_duration_sec=1.0
+                )
+                
             except socket.timeout:
                 continue
             except json.JSONDecodeError:
