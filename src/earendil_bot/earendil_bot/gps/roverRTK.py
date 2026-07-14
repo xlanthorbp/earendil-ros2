@@ -192,16 +192,16 @@ def parse_gga(line: str):
 
 def quality_text(q: int) -> str:
     if q == 4:
-        return "RTK_FIXED"
+        return "RTK (FIXED - Hassas)"
     if q == 5:
-        return "RTK_FLOAT"
+        return "RTK (FLOAT - Hassas Değil)"
     if q == 2:
-        return "DGPS"
+        return "DGPS (Düzeltilmiş)"
     if q == 1:
-        return "SPS"
+        return "SPS (Standart GPS)"
     if q == 0:
-        return "NO_FIX"
-    return f"Q{q}"
+        return "GEÇERSİZ (Fix Yok)"
+    return f"Bilinmeyen (Q{q})"
 
 
 def make_map_links(lat: float, lon: float):
@@ -233,6 +233,7 @@ class RoverRTKNode(Node):
         self.declare_parameter('min_pwm', 60)
         self.declare_parameter('max_pwm', 90)
         self.declare_parameter('target_pwm', 80)
+        self.declare_parameter('cmd_vel_topic', '/cmd_vel')
 
         self.gps_port = self.get_parameter('gps_port').value
         self.radio_port = self.get_parameter('radio_port').value
@@ -242,6 +243,7 @@ class RoverRTKNode(Node):
         self.min_pwm = self.get_parameter('min_pwm').value
         self.max_pwm = self.get_parameter('max_pwm').value
         self.target_pwm = self.get_parameter('target_pwm').value
+        self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
 
         # Fallbacks for hardware_params.yaml default dummy placeholders
         if "ttyUSBx" in self.gps_port:
@@ -257,12 +259,14 @@ class RoverRTKNode(Node):
         self.current_sats = 0
         self.current_hdop = 0.0
         self.has_fix = False
+        self.last_logged_quality = -1
+        self.logging_muted = False
 
         self.stop_flag = threading.Event()
 
         # ROS Publishers
         self.gps_pub = self.create_publisher(NavSatFix, '/gps/fix', 10)
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
 
         # Serial Connections
         self.get_logger().info(f"[ROVER] Starting serial connections...")
@@ -307,7 +311,7 @@ class RoverRTKNode(Node):
         self.t_test_flow.start()
 
     def configure_rover_gps(self) -> None:
-        self.get_logger().info("[ROVER CONFIG] LC29HEA rover ayarlari gonderiliyor...")
+        self.get_logger().info("[GPS KONFİG] LC29HEA alıcı ayarları gönderiliyor...")
         self.send_cmd("PQTMCFGRCVRMODE,W,1")
         self.send_cmd("PQTMSAVEPAR", 0.5)
         self.send_cmd("PAIR062,2,0")  # GSA off
@@ -317,11 +321,11 @@ class RoverRTKNode(Node):
         self.send_cmd("PAIR050,200")  # 5 Hz
         self.send_cmd("PAIR062,0,01")  # GGA on
         self.send_cmd("PQTMSAVEPAR", 0.5)
-        self.get_logger().info("[ROVER CONFIG] Komutlar gonderildi.")
+        self.get_logger().info("[GPS KONFİG] Ayarlar başarıyla gönderildi ve kaydedildi.")
 
     def send_cmd(self, body: str, wait: float = 0.25) -> None:
         cmd = make_cmd(body)
-        self.get_logger().info(f"[GPS CMD] {cmd.decode().strip()}")
+        self.get_logger().info(f"[GPS CMD] Komut gönderildi: {cmd.decode().strip()}")
         self.gps.write(cmd)
         self.gps.flush()
         time.sleep(wait)
@@ -342,27 +346,23 @@ class RoverRTKNode(Node):
                     total_gps_write_bytes += len(data)
                     rtcm.feed(data)
             except Exception as e:
-                self.get_logger().error(f"RF -> GPS Bridge error: {e}")
+                self.get_logger().error(f"[RTCM HATA] RF -> GPS RTCM köprü hatası: {e}")
                 time.sleep(0.5)
                 continue
 
             now = time.time()
-            if now - last_print >= 2.0:
+            if not self.logging_muted and (now - last_print >= 5.0):  # Throttled to 5 seconds to reduce terminal clutter
                 last_print = now
                 if rtcm.counts:
                     counts_text = ", ".join(
-                        f"{msg}:{cnt}" for msg, cnt in sorted(rtcm.counts.items())
+                        f"Tip {msg}: {cnt} adet" for msg, cnt in sorted(rtcm.counts.items())
                     )
                     self.get_logger().info(
-                        f"[ROVER RTCM IN] rf_bytes={total_rf_bytes} "
-                        f"gps_write_bytes={total_gps_write_bytes} "
-                        f"msg_counts={{ {counts_text} }}"
+                        f"[RTCM ALICI] RF Bayt={total_rf_bytes} | GPS Yazılan={total_gps_write_bytes} | Düzeltmeler: {counts_text}"
                     )
                 else:
                     self.get_logger().info(
-                        f"[ROVER RTCM IN] rf_bytes={total_rf_bytes} "
-                        f"gps_write_bytes={total_gps_write_bytes} "
-                        f"henuz RTCM D3 frame yakalanmadi"
+                        f"[RTCM ALICI] RF Bayt={total_rf_bytes} | GPS Yazılan={total_gps_write_bytes} | Henüz RTCM düzeltme paketi alınamadı."
                     )
 
     def gps_read_loop(self) -> None:
@@ -375,7 +375,7 @@ class RoverRTKNode(Node):
                 if not data:
                     continue
             except Exception as e:
-                self.get_logger().error(f"GPS read error: {e}")
+                self.get_logger().error(f"[GPS HATA] Okuma hatası: {e}")
                 time.sleep(0.5)
                 continue
 
@@ -422,36 +422,24 @@ class RoverRTKNode(Node):
 
                         self.gps_pub.publish(fix_msg)
 
-                        self.get_logger().info(
-                            f"[GGA] {quality_text(q)} "
-                            f"lat={lat:.8f} lon={lon:.8f} alt={alt} "
-                            f"sats={sats} hdop={hdop}"
-                        )
-
-                        now = time.time()
-                        if now - last_map_print >= MAP_LINK_PRINT_INTERVAL:
-                            last_map_print = now
+                    now = time.time()
+                    quality_changed = (q != self.last_logged_quality)
+                    if not self.logging_muted and (quality_changed or (now - last_map_print >= 10.0)):
+                        last_map_print = now
+                        self.last_logged_quality = q
+                        if lat is not None and lon is not None:
                             osm_link, google_link = make_map_links(lat, lon)
-                            self.get_logger().info(f"[OSM]    {osm_link}")
-                            self.get_logger().info(f"[GOOGLE] {google_link}")
-                    else:
-                        self.get_logger().info(
-                            f"[GGA] {quality_text(q)} "
-                            f"lat=None lon=None alt={alt} "
-                            f"sats={sats} hdop={hdop}"
-                        )
-
-                    if q == 4:
-                        self.get_logger().info("[DURUM] RTK FIXED: 5 cm hedefi icin uygun durum.")
-                    elif q == 5:
-                        self.get_logger().info("[DURUM] RTK FLOAT: calisiyor ama 5 cm icin FIXED bekle.")
-                    elif q in (1, 2):
-                        self.get_logger().info("[DURUM] Normal GPS/DGPS. RTCM geliyor olabilir ama RTK degil.")
-                    else:
-                        self.get_logger().info("[DURUM] Fix yok veya zayif.")
-
+                            self.get_logger().info(
+                                f"[GPS VERİSİ] Kalite: {quality_text(q)} | Enlem: {lat:.8f}, Boylam: {lon:.8f} | Yükseklik: {alt}m | Uydu: {sats} | HDOP: {hdop}"
+                            )
+                            self.get_logger().info(f"[GPS LİNK] Google Harita: {google_link}")
+                            self.get_logger().info(f"[GPS LİNK] OpenStreetMap: {osm_link}")
+                        else:
+                            self.get_logger().info(
+                                f"[GPS VERİSİ] Kalite: {quality_text(q)} | Sinyal zayıf (Koordinat yok) | Uydu: {sats} | HDOP: {hdop}"
+                            )
                 elif line.startswith("$PQTM"):
-                    self.get_logger().info(f"[GPS PQTM] {line}")
+                    pass
 
     def pwm_to_velocity(self, target_pwm):
         if self.max_pwm == self.min_pwm:
@@ -475,131 +463,156 @@ class RoverRTKNode(Node):
         self.cmd_pub.publish(stop_cmd)
 
     def run_test_flow(self):
-        self.get_logger().info("[TEST] Test thread started. Waiting for initial GPS fix...")
-        while rclpy.ok() and not self.has_fix:
-            time.sleep(0.5)
+        try:
+            self.get_logger().info("[TEST] Test iş parçacığı başlatıldı. GPS Fix alınması bekleniyor...")
+            while rclpy.ok() and not self.has_fix:
+                time.sleep(0.5)
 
-        if not rclpy.ok():
-            return
-
-        # STEP 1: Get Initial GPS Position (P_start)
-        self.get_logger().info("[TEST] GPS Fix detected. Averaging initial position for 2 seconds...")
-        lat_sum = 0.0
-        lon_sum = 0.0
-        count = 0
-        for _ in range(10):
-            if self.current_lat is not None and self.current_lon is not None:
-                lat_sum += self.current_lat
-                lon_sum += self.current_lon
-                count += 1
-            time.sleep(0.2)
-
-        if count > 0:
-            lat_start = lat_sum / count
-            lon_start = lon_sum / count
-        else:
-            lat_start = self.current_lat
-            lon_start = self.current_lon
-
-        self.get_logger().info(f"[TEST] Start Coordinate (P_start): ({lat_start:.8f}, {lon_start:.8f})")
-
-        # STEP 2: Drive 5 Meters Forward at 80 PWM
-        # Forward speed at 80 PWM: 70 cm in 5 seconds = 0.14 m/s
-        # Time to go 5.0 meters = 5.0 / 0.14 = 35.714 seconds
-        forward_duration = 5.0 / 0.14
-        v_fwd = self.pwm_to_velocity(self.target_pwm)
-
-        self.get_logger().info(f"[TEST] Driving 5 meters forward at {self.target_pwm} PWM (vel={v_fwd:.4f}) for {forward_duration:.2f} seconds...")
-        self.send_velocity(v_fwd, 0.0, forward_duration)
-        self.get_logger().info("[TEST] Driving complete. Waiting 3 seconds for GPS to settle...")
-        time.sleep(3.0)
-
-        # STEP 3: Get Final GPS Position (P_end)
-        self.get_logger().info("[TEST] Averaging final position for 2 seconds...")
-        lat_sum = 0.0
-        lon_sum = 0.0
-        count = 0
-        for _ in range(10):
-            if self.current_lat is not None and self.current_lon is not None:
-                lat_sum += self.current_lat
-                lon_sum += self.current_lon
-                count += 1
-            time.sleep(0.2)
-
-        if count > 0:
-            lat_end = lat_sum / count
-            lon_end = lon_sum / count
-        else:
-            lat_end = self.current_lat
-            lon_end = self.current_lon
-
-        self.get_logger().info(f"[TEST] End Coordinate (P_end): ({lat_end:.8f}, {lon_end:.8f})")
-
-        # STEP 4: Calculate Heading Vector
-        theta_start = bearing_between_gps_deg(lat_start, lon_start, lat_end, lon_end)
-        self.get_logger().info(f"[TEST] =========================================")
-        self.get_logger().info(f"[TEST] Initial Heading Vector: {theta_start:.2f}°")
-        self.get_logger().info(f"[TEST] =========================================")
-
-        # STEP 5: Prompt for Target Coordinate
-        while rclpy.ok():
-            print("\n" + "="*50)
-            print(" ENTER TARGET COORDINATES MANUALLY ")
-            print("="*50)
-            print(f"Current RTK Quality: {quality_text(self.current_quality)} ({self.current_sats} sats)")
-            print(f"Current Location: ({lat_end:.8f}, {lon_end:.8f})")
-            print("Please enter latitude and longitude separated by a comma.")
-            print("Example: 39.925000, 32.836000")
-            print("="*50)
-
-            try:
-                user_input = input("Target coordinates (lat, lon): ")
-                if not user_input.strip():
-                    continue
-                lat_str, lon_str = user_input.split(",")
-                target_lat = float(lat_str.strip())
-                target_lon = float(lon_str.strip())
-                break
-            except KeyboardInterrupt:
+            if not rclpy.ok():
                 return
-            except Exception as e:
-                print(f"Error parsing coordinates: {e}. Please try again.")
 
-        # STEP 6: Calculate Turn Angle & Duration
-        theta_target = bearing_between_gps_deg(lat_end, lon_end, target_lat, target_lon)
-        distance = haversine(lat_end, lon_end, target_lat, target_lon)
-        delta_theta = angle_error_deg(theta_target, theta_start)
+            # ADIM 1: 5 saniye beklenip bu sürede gelen en iyi GPS koordinatını bul
+            self.get_logger().info("[TEST] GPS Sinyali tespit edildi. 5 saniye bekleniyor ve bu süredeki EN İYİ GPS koordinatı belirleniyor...")
+            
+            best_lat = None
+            best_lon = None
+            best_quality = -1
+            best_hdop = 999.0
+            
+            start_wait = time.time()
+            while rclpy.ok() and (time.time() - start_wait < 5.0):
+                if self.current_lat is not None and self.current_lon is not None:
+                    is_better = False
+                    if best_lat is None:
+                        is_better = True
+                    elif self.current_quality > best_quality:
+                        is_better = True
+                    elif self.current_quality == best_quality and self.current_hdop < best_hdop:
+                        is_better = True
+                        
+                    if is_better:
+                        best_lat = self.current_lat
+                        best_lon = self.current_lon
+                        best_quality = self.current_quality
+                        best_hdop = self.current_hdop
+                time.sleep(0.1)
+                
+            if best_lat is not None:
+                lat_start = best_lat
+                lon_start = best_lon
+            else:
+                lat_start = self.current_lat
+                lon_start = self.current_lon
+                best_quality = self.current_quality
+                best_hdop = self.current_hdop
 
-        self.get_logger().info(f"[TEST] Target Coordinate: ({target_lat:.8f}, {target_lon:.8f})")
-        self.get_logger().info(f"[TEST] Distance to Target: {distance:.2f} meters")
-        self.get_logger().info(f"[TEST] Target Bearing: {theta_target:.2f}°")
-        self.get_logger().info(f"[TEST] Required Turn Angle: {delta_theta:.2f}°")
+            self.get_logger().info(
+                f"[TEST] Belirlenen En İyi Başlangıç Konumu (P_start): ({lat_start:.8f}, {lon_start:.8f}) "
+                f"| Kalite: {quality_text(best_quality)} | HDOP: {best_hdop}"
+            )
 
-        # Turning speed at 80 PWM: 130 degrees in 5 seconds = 26.0 deg/s
-        turn_duration = abs(delta_theta) / 26.0
-        w_turn = self.pwm_to_velocity(self.target_pwm)
+            # ADIM 2: 80 PWM ile 5 Saniye İleri Sür (Yön Vektörü Oluşturmak İçin)
+            forward_duration = 5.0
+            v_fwd = self.pwm_to_velocity(self.target_pwm)
 
-        # Positive delta_theta means target is clockwise (right).
-        # Negative delta_theta means target is counter-clockwise (left).
-        # In ROS, positive angular.z turns left, negative turns right.
-        if delta_theta > 0:
-            angular_z = -w_turn  # Turn right
-            direction_str = "RIGHT"
-        else:
-            angular_z = w_turn   # Turn left
-            direction_str = "LEFT"
+            self.get_logger().info(f"[TEST] {self.target_pwm} PWM hızla (hız={v_fwd:.4f}) {forward_duration:.1f} saniye ileri sürülüyor...")
+            self.send_velocity(v_fwd, 0.0, forward_duration)
+            self.get_logger().info("[TEST] İleri sürüş bitti. GPS konumunun oturması için 3 saniye bekleniyor...")
+            time.sleep(3.0)
 
-        self.get_logger().info(f"[TEST] Rotating {direction_str} by {abs(delta_theta):.2f}° at {self.target_pwm} PWM (w={angular_z:.4f}) for {turn_duration:.2f} seconds...")
-        self.send_velocity(0.0, angular_z, turn_duration)
-        self.get_logger().info("[TEST] Turning complete. Waiting 1 second...")
-        time.sleep(1.0)
+            # ADIM 3: Bitiş GPS Konumunu Al (P_end)
+            self.get_logger().info("[TEST] Bitiş konumu 2 saniye boyunca ortalanıyor...")
+            lat_sum = 0.0
+            lon_sum = 0.0
+            count = 0
+            for _ in range(10):
+                if self.current_lat is not None and self.current_lon is not None:
+                    lat_sum += self.current_lat
+                    lon_sum += self.current_lon
+                    count += 1
+                time.sleep(0.2)
 
-        # STEP 7: Drive Straight towards Target
-        drive_duration = distance / 0.14
-        self.get_logger().info(f"[TEST] Driving straight towards target for {distance:.2f} meters at {self.target_pwm} PWM for {drive_duration:.2f} seconds...")
-        self.send_velocity(v_fwd, 0.0, drive_duration)
+            if count > 0:
+                lat_end = lat_sum / count
+                lon_end = lon_sum / count
+            else:
+                lat_end = self.current_lat
+                lon_end = self.current_lon
 
-        self.get_logger().info("[TEST] Target reached! Navigation test complete.")
+            self.get_logger().info(f"[TEST] Bitiş Koordinatı (P_end): ({lat_end:.8f}, {lon_end:.8f})")
+
+            # ADIM 4: Yön Vektörünü Hesapla
+            theta_start = bearing_between_gps_deg(lat_start, lon_start, lat_end, lon_end)
+            self.get_logger().info(f"[TEST] =========================================")
+            self.get_logger().info(f"[TEST] Hesaplanan Araç Yönü: {theta_start:.2f}°")
+            self.get_logger().info(f"[TEST] =========================================")
+
+            # ADIM 5: Hedef Koordinat Girişi İste
+            self.logging_muted = True
+            while rclpy.ok():
+                print("\n" + "="*50)
+                print(" MANUEL HEDEF KOORDİNAT GİRİŞİ ")
+                print("="*50)
+                print(f"Mevcut RTK Kalitesi: {quality_text(self.current_quality)} ({self.current_sats} uydu)")
+                print(f"Mevcut Konum: ({lat_end:.8f}, {lon_end:.8f})")
+                print("Lütfen enlem ve boylamı aralarında virgül olacak şekilde girin.")
+                print("Örnek: 39.925000, 32.836000")
+                print("="*50)
+
+                try:
+                    user_input = input("Hedef Koordinat (lat, lon): ")
+                    if not user_input.strip():
+                        continue
+                    lat_str, lon_str = user_input.split(",")
+                    target_lat = float(lat_str.strip())
+                    target_lon = float(lon_str.strip())
+                    break
+                except KeyboardInterrupt:
+                    self.logging_muted = False
+                    return
+                except Exception as e:
+                    print(f"Koordinat ayrıştırma hatası: {e}. Lütfen tekrar deneyin.")
+            self.logging_muted = False
+
+            # ADIM 6: Dönüş Açısı ve Süresini Hesapla
+            theta_target = bearing_between_gps_deg(lat_end, lon_end, target_lat, target_lon)
+            distance = haversine(lat_end, lon_end, target_lat, target_lon)
+            delta_theta = angle_error_deg(theta_target, theta_start)
+
+            self.get_logger().info(f"[TEST] Hedef Koordinat: ({target_lat:.8f}, {target_lon:.8f})")
+            self.get_logger().info(f"[TEST] Hedefe Olan Mesafe: {distance:.2f} metre")
+            self.get_logger().info(f"[TEST] Hedef Açısı (Bearing): {theta_target:.2f}°")
+            self.get_logger().info(f"[TEST] Gerekli Dönüş Açısı: {delta_theta:.2f}°")
+
+            # Turning speed at 80 PWM: 130 degrees in 5 seconds = 26.0 deg/s
+            turn_duration = abs(delta_theta) / 26.0
+            w_turn = self.pwm_to_velocity(self.target_pwm)
+
+            # Positive delta_theta means target is clockwise (right).
+            # Negative delta_theta means target is counter-clockwise (left).
+            # In ROS, positive angular.z turns left, negative turns right.
+            if delta_theta > 0:
+                angular_z = -w_turn  # Turn right (sağa)
+                direction_str = "SAĞA"
+            else:
+                angular_z = w_turn   # Turn left (sola)
+                direction_str = "SOLA"
+
+            self.get_logger().info(f"[TEST] {self.target_pwm} PWM hızla (w={angular_z:.4f}) {direction_str} {abs(delta_theta):.2f}° dönülüyor ({turn_duration:.2f} saniye)...")
+            self.send_velocity(0.0, angular_z, turn_duration)
+            self.get_logger().info("[TEST] Dönüş tamamlandı. 1 saniye bekleniyor...")
+            time.sleep(1.0)
+
+            # STEP 7: Drive Straight towards Target
+            drive_duration = distance / 0.14
+            self.get_logger().info(f"[TEST] Hedefe doğru {distance:.2f} metre dümdüz sürülüyor ({drive_duration:.2f} saniye)...")
+            self.send_velocity(v_fwd, 0.0, drive_duration)
+
+            self.get_logger().info("[TEST] Hedefe ulaşıldı! Navigasyon testi başarıyla tamamlandı.")
+        except Exception as e:
+            self.get_logger().error(f"[TEST HATA] Test akışında beklenmedik hata: {e}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
 
 # ============================================================

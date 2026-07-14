@@ -20,6 +20,7 @@ hardware_bridge:
     # Motor PWM Limits
     min_pwm: 60
     max_pwm: 90
+    use_gpstest_commands: true
 
 # RTK GPS Node Configuration
 roverRTK:
@@ -32,6 +33,7 @@ roverRTK:
     min_pwm: 60
     max_pwm: 90
     target_pwm: 80
+    cmd_vel_topic: "/cmd_vel"
 
 # 2D Lidar Node Configuration
 STL27L:

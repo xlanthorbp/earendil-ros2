@@ -30,6 +30,7 @@ class HardwareBridgeNode(Node):
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('min_pwm', 60)
         self.declare_parameter('max_pwm', 255)
+        self.declare_parameter('use_gpstest_commands', True)
         
         self.declare_parameter('wheel_radius', 0.033)
         self.declare_parameter('wheel_separation', 0.160)
@@ -41,6 +42,7 @@ class HardwareBridgeNode(Node):
         self.baudrate = self.get_parameter('baudrate').value
         self.min_pwm = self.get_parameter('min_pwm').value
         self.max_pwm = self.get_parameter('max_pwm').value
+        self.use_gpstest_commands = self.get_parameter('use_gpstest_commands').value
         
         self.wheel_radius = self.get_parameter('wheel_radius').value
         self.wheel_separation = self.get_parameter('wheel_separation').value
@@ -181,7 +183,34 @@ class HardwareBridgeNode(Node):
             self.imu_active = False
             self.get_logger().warn("IMU data lost! Continuing with available sensors...")
 
+    def _translate_to_gpstest(self, motor_cmd: str) -> str:
+        if motor_cmd == "MOTOR:STOP":
+            return "dur"
+        parts = motor_cmd.split(":")
+        if len(parts) < 3:
+            return "dur"
+        action = parts[1]
+        try:
+            pwm = int(parts[2])
+        except ValueError:
+            pwm = 80
+            
+        hiz_suffix = "yavas" if pwm <= 100 else "hizli"
+        
+        if action == "FWD":
+            return f"ileri_{hiz_suffix}"
+        elif action == "BACK":
+            return f"geri_{hiz_suffix}"
+        elif action == "LEFT":
+            return f"sol_{hiz_suffix}"
+        elif action == "RIGHT":
+            return f"sag_{hiz_suffix}"
+            
+        return "dur"
+
     def _send_raw(self, cmd):
+        if self.use_gpstest_commands:
+            cmd = self._translate_to_gpstest(cmd)
         try:
             with self.serial_lock:
                 self.ser.write((cmd + "\n").encode('utf-8'))
