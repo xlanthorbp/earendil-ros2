@@ -22,17 +22,21 @@ hardware_bridge:
     max_pwm: 90
 
 # RTK GPS Node Configuration
-rtk_node:
+roverRTK:
   ros__parameters:
-    gps_port: "/dev/ttyUSBx"
-    radio_port: "/dev/ttyUSBx"
+    gps_port: "/dev/ttyUSB0"
+    radio_port: "/dev/ttyUSB1"
     gps_baud: 460800
     radio_baud: 57600
+    configure_rover: true
+    min_pwm: 60
+    max_pwm: 90
+    target_pwm: 80
 
 # 2D Lidar Node Configuration
 STL27L:
   ros__parameters:
-    port_name: "/dev/ttyUSB0"
+    port_name: "/dev/ttyUSBx"
     port_baudrate: 921600
 
 # Aruco Ethernet Receiver Configuration
