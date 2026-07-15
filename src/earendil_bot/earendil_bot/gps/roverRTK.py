@@ -234,6 +234,8 @@ class RoverRTKNode(Node):
         self.declare_parameter('max_pwm', 90)
         self.declare_parameter('target_pwm', 80)
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
+        self.declare_parameter('target_lat', 0.0)
+        self.declare_parameter('target_lon', 0.0)
 
         self.gps_port = self.get_parameter('gps_port').value
         self.radio_port = self.get_parameter('radio_port').value
@@ -244,6 +246,8 @@ class RoverRTKNode(Node):
         self.max_pwm = self.get_parameter('max_pwm').value
         self.target_pwm = self.get_parameter('target_pwm').value
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
+        self.target_lat_param = self.get_parameter('target_lat').value
+        self.target_lon_param = self.get_parameter('target_lon').value
 
         # Fallbacks for hardware_params.yaml default dummy placeholders
         if "ttyUSBx" in self.gps_port:
@@ -548,31 +552,37 @@ class RoverRTKNode(Node):
             self.get_logger().info(f"[TEST] =========================================")
 
             # ADIM 5: Hedef Koordinat Girişi İste
-            self.logging_muted = True
-            while rclpy.ok():
-                print("\n" + "="*50)
-                print(" MANUEL HEDEF KOORDİNAT GİRİŞİ ")
-                print("="*50)
-                print(f"Mevcut RTK Kalitesi: {quality_text(self.current_quality)} ({self.current_sats} uydu)")
-                print(f"Mevcut Konum: ({lat_end:.8f}, {lon_end:.8f})")
-                print("Lütfen enlem ve boylamı aralarında virgül olacak şekilde girin.")
-                print("Örnek: 39.925000, 32.836000")
-                print("="*50)
+            # ADIM 5: Hedef Koordinat Girişi İste / Parametre Kontrolü
+            if self.target_lat_param != 0.0 and self.target_lon_param != 0.0:
+                target_lat = self.target_lat_param
+                target_lon = self.target_lon_param
+                self.get_logger().info(f"[TEST] Parametrelerden alınan hedef koordinat kullanılıyor: ({target_lat:.8f}, {target_lon:.8f})")
+            else:
+                self.logging_muted = True
+                while rclpy.ok():
+                    print("\n" + "="*50)
+                    print(" MANUEL HEDEF KOORDİNAT GİRİŞİ ")
+                    print("="*50)
+                    print(f"Mevcut RTK Kalitesi: {quality_text(self.current_quality)} ({self.current_sats} uydu)")
+                    print(f"Mevcut Konum: ({lat_end:.8f}, {lon_end:.8f})")
+                    print("Lütfen enlem ve boylamı aralarında virgül olacak şekilde girin.")
+                    print("Örnek: 39.925000, 32.836000")
+                    print("="*50)
 
-                try:
-                    user_input = input("Hedef Koordinat (lat, lon): ")
-                    if not user_input.strip():
-                        continue
-                    lat_str, lon_str = user_input.split(",")
-                    target_lat = float(lat_str.strip())
-                    target_lon = float(lon_str.strip())
-                    break
-                except KeyboardInterrupt:
-                    self.logging_muted = False
-                    return
-                except Exception as e:
-                    print(f"Koordinat ayrıştırma hatası: {e}. Lütfen tekrar deneyin.")
-            self.logging_muted = False
+                    try:
+                        user_input = input("Hedef Koordinat (lat, lon): ")
+                        if not user_input.strip():
+                            continue
+                        lat_str, lon_str = user_input.split(",")
+                        target_lat = float(lat_str.strip())
+                        target_lon = float(lon_str.strip())
+                        break
+                    except KeyboardInterrupt:
+                        self.logging_muted = False
+                        return
+                    except Exception as e:
+                        print(f"Koordinat ayrıştırma hatası: {e}. Lütfen tekrar deneyin.")
+                self.logging_muted = False
 
             # ADIM 6: Dönüş Açısı ve Süresini Hesapla
             theta_target = bearing_between_gps_deg(lat_end, lon_end, target_lat, target_lon)
