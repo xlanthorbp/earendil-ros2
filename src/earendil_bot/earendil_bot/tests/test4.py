@@ -8,9 +8,9 @@ from sensor_msgs.msg import Range
 from nav_msgs.msg import Odometry
 import math
 
-class Test3Node(Node):
+class Test4Node(Node):
     def __init__(self):
-        super().__init__('test3')
+        super().__init__('test4')
         
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
@@ -73,7 +73,7 @@ class Test3Node(Node):
         # ROS 2 Shutdown Hook: Triggered when the node shuts down (error or normal)
         rclpy.get_default_context().on_shutdown(self.stop_motors_safely)
         
-        self.get_logger().info('Test3 Node Started (Entrance and Exit ArUco Enabled).')
+        self.get_logger().info('Test4 Node Started (Entrance and Exit ArUco Enabled).')
         self.get_logger().info('State: SEARCHING_ENTRANCE (Turning right, looking for ArUco)')
 
     def aruco_visible_callback(self, msg):
@@ -317,7 +317,7 @@ class Test3Node(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Test3Node()
+    node = Test4Node()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

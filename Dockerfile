@@ -56,4 +56,4 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["ros2", "launch", "earendil_bot", "robot.launch.py"]
+CMD ["ros2", "launch", "earendil_bot", "tunnel_hardware.launch.py"]
