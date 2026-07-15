@@ -1,27 +1,3 @@
-tunnel_navigator:
-  ros__parameters:
-    forward_speed_approach: 0.2
-    forward_speed_tunnel: 0.2
-    safety_speed: 0.1
-    kp: 0.5
-    kd: 1.0
-    kp_aruco: 0.02
-    safety_threshold: 0.25
-    tunnel_detection_threshold: 1.0
-    sensor_height_from_ground: 1.0
-    window_deg: 10.0
-
-lidar_motor_test:
-  ros__parameters:
-    forward_speed_approach: 0.2
-    forward_speed_tunnel: 0.2
-    safety_speed: 0.1
-    kp: 0.5
-    kd: 1.0
-    safety_threshold: 0.25
-    tunnel_detection_threshold: 1.0
-    window_deg: 10.0
-    
 test1:
   ros__parameters:
     forward_speed_approach: 0.2
@@ -62,3 +38,19 @@ test3:
     window_deg: 10.0
     ir_height: 1.0
     ir_limit: 1.49
+
+test4:
+  ros__parameters:
+    forward_speed_approach: 0.2
+    forward_speed_tunnel: 0.2
+    safety_speed: 0.1
+    kp: 0.5
+    kd: 1.0
+    kp_aruco: 0.02
+    kp_width: 0.5
+    safety_threshold: 0.25
+    tunnel_detection_threshold: 1.0
+    window_deg: 10.0
+    ir_height: 1.0
+    ir_limit: 1.49
+

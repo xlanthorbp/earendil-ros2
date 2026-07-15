@@ -5,7 +5,7 @@
 hardware_bridge:
   ros__parameters:
     # Serial Port Settings
-    port: "/dev/ttyACM0"
+    port: "/dev/ttyACMx"
     baudrate: 115200
     ir_height: 1.0                # meters (Height of the IR sensor from the ground)
 
@@ -25,8 +25,8 @@ hardware_bridge:
 # RTK GPS Node Configuration
 roverRTK:
   ros__parameters:
-    gps_port: "/dev/ttyUSB0"
-    radio_port: "/dev/ttyUSB1"
+    gps_port: "/dev/ttyUSBx"
+    radio_port: "/dev/ttyUSBx"
     gps_baud: 460800
     radio_baud: 57600
     configure_rover: true
@@ -49,4 +49,12 @@ aruco_receiver:
     jetson_ip: "192.168.1.101"
     port_recv: 5005
     port_send: 5006
+    timeout: 1.5
+
+# Rock Ethernet Receiver Configuration
+rock_receiver:
+  ros__parameters:
+    jetson_ip: "192.168.1.101"
+    port_recv: 5007
+    port_send: 5008
     timeout: 1.5
