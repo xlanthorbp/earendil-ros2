@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Bu script Raspberry Pi 5 üzerinde çalışmaktadır.
+# Base Exit Node tarafından kaydedilen baz istasyonu konumunu kullanarak robotu güvenli bir şekilde şarj istasyonuna döndürmek için tasarlanmıştır.
+# (Not: earendil_bot paketindeki genel tüm scriptler Raspberry Pi üzerinden çalışmaktadır.
+#  Sadece earendil_bot/scripts/ klasöründekiler hariçtir; oradaki kodlar örnek/test kodlarıdır.)
 import json
 import math
 import os

@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
+# Bu script Raspberry Pi 5 üzerinde çalışmaktadır.
+# (Not: earendil_bot paketindeki genel tüm scriptler Raspberry Pi üzerinden çalışmaktadır.
+#  Sadece earendil_bot/scripts/ klasöründekiler hariçtir; oradaki kodlar örnek/test kodlarıdır.)
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import Twist, Point
-from std_msgs.msg import Bool
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Range
 from nav_msgs.msg import Odometry
 import math
 
-class Test2Node(Node):
+class Test1Node(Node):
     def __init__(self):
-        super().__init__('test2')
+        super().__init__('test1')
         
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.ir_sub = self.create_subscription(Range, '/ir_top', self.ir_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         
-        self.aruco_midpoint_sub = self.create_subscription(Point, '/aruco_midpoint', self.aruco_midpoint_callback, 10)
-        self.aruco_visible_sub = self.create_subscription(Bool, '/aruco_visible', self.aruco_visible_callback, 10)
-        
         # State Variables
         self.previous_error = 0.0
-        self.state = 'SEARCHING_ENTRANCE'
+        self.state = 'APPROACHING_ENTRANCE'
         self.tunnel_start_time = None
         
         # Tunnel Timer State
@@ -36,11 +35,6 @@ class Test2Node(Node):
         self.out_of_tunnel_consecutive_count = 0
         self.first_out_of_tunnel_time = None
         
-        # Aruco Variables
-        self.aruco_visible = False
-        self.aruco_angle = 0.0
-        self.aruco_distance = 0.0
-        
         # Parameters
         self.declare_parameter('forward_speed_approach', 0.2)
         self.declare_parameter('forward_speed_tunnel', 0.2)
@@ -50,7 +44,6 @@ class Test2Node(Node):
         self.declare_parameter('safety_threshold', 0.25)
         self.declare_parameter('tunnel_detection_threshold', 1.0)
         self.declare_parameter('window_deg', 10.0)
-        self.declare_parameter('kp_aruco', 0.02)
         self.declare_parameter('ir_height', 1.0)
         self.declare_parameter('ir_limit', 1.49)
         
@@ -62,22 +55,14 @@ class Test2Node(Node):
         self.safety_threshold = self.get_parameter('safety_threshold').value
         self.tunnel_detection_threshold = self.get_parameter('tunnel_detection_threshold').value
         self.window_deg = self.get_parameter('window_deg').value
-        self.kp_aruco = self.get_parameter('kp_aruco').value
         self.ir_height = self.get_parameter('ir_height').value
         self.ir_limit = self.get_parameter('ir_limit').value
         
         # ROS 2 Shutdown Hook: Triggered when the node shuts down (error or normal)
         rclpy.get_default_context().on_shutdown(self.stop_motors_safely)
         
-        self.get_logger().info('Test2 Node Started (Entrance Aruco Enabled).')
-        self.get_logger().info('State: SEARCHING_ENTRANCE (Turning right, looking for ArUco)')
-
-    def aruco_visible_callback(self, msg):
-        self.aruco_visible = msg.data
-
-    def aruco_midpoint_callback(self, msg):
-        self.aruco_angle = msg.x
-        self.aruco_distance = msg.z
+        self.get_logger().info('Test1 Node Started (No Camera/Aruco).')
+        self.get_logger().info('State: APPROACHING_ENTRANCE')
 
     def stop_motors_safely(self):
         """Sends 0 velocity to motors when the node shuts down for any reason."""
@@ -152,51 +137,14 @@ class Test2Node(Node):
         left_dist = self.get_avg_distance(msg, 90.0)
         right_dist = self.get_avg_distance(msg, -90.0)
         
-        if self.state == 'SEARCHING_ENTRANCE':
-            if self.aruco_visible:
-                self.get_logger().info('Entrance ArUco detected! Switching to ALIGNING_IN_PLACE.')
-                self.state = 'ALIGNING_IN_PLACE'
-            else:
-                self.get_logger().info('Searching for entrance ArUco...', throttle_duration_sec=2.0)
-                twist.angular.z = -0.5 # Turn right slowly
-                
-        elif self.state == 'ALIGNING_IN_PLACE':
-            if self.aruco_visible:
-                if abs(self.aruco_angle) > 3.0:  # If deviation is more than 3 degrees
-                    self.get_logger().info(f'Aligning in place... Angle: {self.aruco_angle:.1f}deg', throttle_duration_sec=1.0)
-                    twist.linear.x = 0.0
-                    
-                    angular_speed = -self.kp_aruco * self.aruco_angle
-                    # Minimum limit so rotation speed does not slow down too much (0.15 rad/s)
-                    if angular_speed > 0 and angular_speed < 0.15:
-                        angular_speed = 0.15
-                    elif angular_speed < 0 and angular_speed > -0.15:
-                        angular_speed = -0.15
-                        
-                    twist.angular.z = angular_speed
-                else:
-                    self.get_logger().info('Perfectly aligned to the center! Just going straight (APPROACHING_ENTRANCE).')
-                    self.state = 'APPROACHING_ENTRANCE'
-            else:
-                self.get_logger().warn('ArUco lost while aligning! Searching again.', throttle_duration_sec=1.0)
-                self.state = 'SEARCHING_ENTRANCE'
-                
-        elif self.state == 'APPROACHING_ENTRANCE':
+        if self.state == 'APPROACHING_ENTRANCE':
             if left_dist < self.tunnel_detection_threshold and right_dist < self.tunnel_detection_threshold:
                 self.get_logger().info(f'---> WALLS DETECTED! (Left: {left_dist:.2f}m, Right: {right_dist:.2f}m). ENTERED TUNNEL!')
                 self.state = 'IN_TUNNEL'
                 self.tunnel_start_time = self.get_clock().now()
             else:
                 twist.linear.x = self.forward_speed_approach
-                if self.aruco_visible:
-                    # Apply correction if deviation is more than 2.0 degrees (tolerance offset)
-                    if abs(self.aruco_angle) > 2.0:
-                        twist.angular.z = -self.kp_aruco * self.aruco_angle
-                        self.get_logger().info(f'Approaching Entrance - Correcting Heading: angle={self.aruco_angle:.1f}deg, cmd_z={twist.angular.z:.2f}', throttle_duration_sec=1.0)
-                    else:
-                        twist.angular.z = 0.0
-                else:
-                    twist.angular.z = 0.0
+                twist.angular.z = 0.0
                 
         elif self.state == 'IN_TUNNEL':
             # Check if we exited the tunnel
@@ -260,7 +208,7 @@ class Test2Node(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Test2Node()
+    node = Test1Node()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

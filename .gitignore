@@ -64,3 +64,6 @@ venv.bak/
 
 # Temp files
 tmp/
+
+# PDF files
+/*.pdf

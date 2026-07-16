@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# DIKKAT: Bu klasördeki (earendil_bot/scripts/) kodlar sadece örnek/test kodlarıdır.
+# earendil_bot paketindeki genel tüm ana scriptler Raspberry Pi 5 üzerinden çalışmaktadır.
 import subprocess
 import time
 import cv2

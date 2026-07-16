@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Bu script Raspberry Pi 5 üzerinde çalışmaktadır.
+# Jetson Nano ile ethernet kablosu üzerinden kurulan yerel ağ (LAN) bağlantısı vasıtasıyla haberleşir.
+# Jetson Nano üzerinde bir systemd servisi (service) olarak çalışan algılama scriptinden UDP soketleri
+# üzerinden gelen tespit verilerini (ArUco koordinat ve genişlik bilgilerini) dinler/alır ve bunları ROS 2 topic'lerine publish eder.
+# (Not: earendil_bot paketindeki genel tüm scriptler Raspberry Pi üzerinden çalışmaktadır.
+#  Sadece earendil_bot/scripts/ klasöründekiler hariçtir; oradaki kodlar örnek/test kodlarıdır.)
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Point

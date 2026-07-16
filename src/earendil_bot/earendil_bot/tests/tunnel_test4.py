@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Bu script Raspberry Pi 5 üzerinde çalışmaktadır.
+# (Not: earendil_bot paketindeki genel tüm scriptler Raspberry Pi üzerinden çalışmaktadır.
+#  Sadece earendil_bot/scripts/ klasöründekiler hariçtir; oradaki kodlar örnek/test kodlarıdır.)
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
@@ -8,9 +11,9 @@ from sensor_msgs.msg import Range
 from nav_msgs.msg import Odometry
 import math
 
-class Test3Node(Node):
+class Test4Node(Node):
     def __init__(self):
-        super().__init__('test3')
+        super().__init__('test4')
         
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
@@ -40,6 +43,7 @@ class Test3Node(Node):
         # Aruco Variables
         self.aruco_visible = False
         self.aruco_angle = 0.0
+        self.aruco_width_diff = 0.0
         self.aruco_distance = 0.0
         
         # Parameters
@@ -52,6 +56,7 @@ class Test3Node(Node):
         self.declare_parameter('tunnel_detection_threshold', 1.0)
         self.declare_parameter('window_deg', 10.0)
         self.declare_parameter('kp_aruco', 0.02)
+        self.declare_parameter('kp_width', 0.5)
         self.declare_parameter('ir_height', 1.0)
         self.declare_parameter('ir_limit', 1.49)
         
@@ -64,13 +69,14 @@ class Test3Node(Node):
         self.tunnel_detection_threshold = self.get_parameter('tunnel_detection_threshold').value
         self.window_deg = self.get_parameter('window_deg').value
         self.kp_aruco = self.get_parameter('kp_aruco').value
+        self.kp_width = self.get_parameter('kp_width').value
         self.ir_height = self.get_parameter('ir_height').value
         self.ir_limit = self.get_parameter('ir_limit').value
         
         # ROS 2 Shutdown Hook: Triggered when the node shuts down (error or normal)
         rclpy.get_default_context().on_shutdown(self.stop_motors_safely)
         
-        self.get_logger().info('Test3 Node Started (Entrance and Exit ArUco Enabled).')
+        self.get_logger().info('Test4 Node Started (Entrance and Exit ArUco Enabled).')
         self.get_logger().info('State: SEARCHING_ENTRANCE (Turning right, looking for ArUco)')
 
     def aruco_visible_callback(self, msg):
@@ -78,6 +84,7 @@ class Test3Node(Node):
 
     def aruco_midpoint_callback(self, msg):
         self.aruco_angle = msg.x
+        self.aruco_width_diff = msg.y
         self.aruco_distance = msg.z
 
     def stop_motors_safely(self):
@@ -190,12 +197,9 @@ class Test3Node(Node):
             else:
                 twist.linear.x = self.forward_speed_approach
                 if self.aruco_visible:
-                    # Apply correction if deviation is more than 2.0 degrees (tolerance offset)
-                    if abs(self.aruco_angle) > 2.0:
-                        twist.angular.z = -self.kp_aruco * self.aruco_angle
-                        self.get_logger().info(f'Approaching Entrance - Correcting Heading: angle={self.aruco_angle:.1f}deg, cmd_z={twist.angular.z:.2f}', throttle_duration_sec=1.0)
-                    else:
-                        twist.angular.z = 0.0
+                    # Combined steering: correct heading AND lateral offset using ArUco angle and width difference
+                    twist.angular.z = -self.kp_aruco * self.aruco_angle + self.kp_width * self.aruco_width_diff
+                    self.get_logger().info(f'Approaching Entrance - Correcting: angle={self.aruco_angle:.1f}deg, width_diff={self.aruco_width_diff:.3f}, cmd_z={twist.angular.z:.2f}', throttle_duration_sec=1.0)
                 else:
                     twist.angular.z = 0.0
                 
@@ -269,13 +273,9 @@ class Test3Node(Node):
         elif self.state == 'APPROACHING_EXIT':
             if self.aruco_visible:
                 twist.linear.x = self.forward_speed_approach
-                # Apply correction if deviation is more than 2.0 degrees (tolerance offset)
-                if abs(self.aruco_angle) > 2.0:
-                    twist.angular.z = -self.kp_aruco * self.aruco_angle
-                    self.get_logger().info(f'Approaching Exit - Correcting Heading: angle={self.aruco_angle:.1f}deg, cmd_z={twist.angular.z:.2f}', throttle_duration_sec=1.0)
-                else:
-                    twist.angular.z = 0.0
-                    self.get_logger().info('Approaching exit arucos...', throttle_duration_sec=1.0)
+                # Combined steering: correct heading AND lateral offset using ArUco angle and width difference
+                twist.angular.z = -self.kp_aruco * self.aruco_angle + self.kp_width * self.aruco_width_diff
+                self.get_logger().info(f'Approaching Exit - Correcting: angle={self.aruco_angle:.1f}deg, width_diff={self.aruco_width_diff:.3f}, cmd_z={twist.angular.z:.2f}', throttle_duration_sec=1.0)
             else:
                 self.get_logger().info('Exit ArUco lost while approaching! Stopping in 1 second...')
                 self.exit_lost_time = self.get_clock().now()
@@ -320,7 +320,7 @@ class Test3Node(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Test3Node()
+    node = Test4Node()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

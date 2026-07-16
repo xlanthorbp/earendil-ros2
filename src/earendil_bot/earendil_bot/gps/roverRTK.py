@@ -1,3 +1,6 @@
+# Bu script Raspberry Pi 5 üzerinde çalışmaktadır.
+# (Not: earendil_bot paketindeki genel tüm scriptler Raspberry Pi üzerinden çalışmaktadır.
+#  Sadece earendil_bot/scripts/ klasöründekiler hariçtir; oradaki kodlar örnek/test kodlarıdır.)
 import serial
 import time
 import threading

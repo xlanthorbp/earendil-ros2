@@ -1,3 +1,4 @@
+# Bu script, RTK sistemi için base (istasyon) olarak kullanılacak yer bilgisayarında çalıştırılmalıdır.
 import serial
 import time
 from collections import Counter
