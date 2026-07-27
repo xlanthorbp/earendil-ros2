@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Bu script Jetson Nano üzerinde çalışmaktadır ve bir systemd servisi (service) olarak arka planda otomatik başlatılır.
+# Bu script Jetson Nano üzerinde çalışmaktadır ve bir systemd servisi (rock_perception.service) olarak arka planda otomatik başlatılır.
 # Raspberry Pi 5 ile ethernet kablosu üzerinden kurulan yerel ağ (LAN) bağlantısı üzerinden haberleşir.
 # Kamera görüntüsünü işleyerek taş (rock) tespitlerini yapar ve elde edilen verileri UDP soketleri aracılığıyla Raspberry Pi 5'e iletir.
 import cv2
@@ -33,6 +33,10 @@ SHOW_DISPLAY = True            # Enable/Disable GUI window (set to False for hea
 CHROMA_WEIGHT = 2.5
 MIN_CENTER_Y_RATIO = 0.15
 BOX_MARGIN_RATIO = 0.10
+
+# Optimizasyon Ayarları
+USE_GRABCUT = False   # Yavas GrabCut adımını atla, dogrudan Watershed maskesini kullan
+DOWN_SCALE = 2        # Islem hızını artırmak icin goruntuyu bu oranda kucult
 
 # =========================
 # CSI KAMERA SINIFI
@@ -132,23 +136,23 @@ def build_foreground_mask(image, cluster_count=5):
     if len(pixels) == 0:
         return np.zeros((height, width), dtype=np.uint8), roi_start_y
 
-    max_samples = 30000
+    max_samples = 8000
     if len(pixels) > max_samples:
-        rng = np.random.default_rng(0)
+        rng = np.random.RandomState(0)
         indices = rng.choice(len(pixels), max_samples, replace=False)
         samples = np.ascontiguousarray(pixels[indices], dtype=np.float32)
     else:
         samples = np.ascontiguousarray(pixels, dtype=np.float32)
 
     actual_cluster_count = min(cluster_count, len(samples))
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.5)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 15, 1.0)
 
     _, labels, centers = cv2.kmeans(
         samples,
         actual_cluster_count,
         None,
         criteria,
-        5,
+        1,
         cv2.KMEANS_PP_CENTERS,
     )
 
@@ -160,8 +164,16 @@ def build_foreground_mask(image, cluster_count=5):
 
     _, roi_mask = cv2.threshold(distance_8bit, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    roi_mask = cv2.morphologyEx(roi_mask, cv2.MORPH_OPEN, np.ones((5, 5), dtype=np.uint8))
-    roi_mask = cv2.morphologyEx(roi_mask, cv2.MORPH_CLOSE, np.ones((11, 11), dtype=np.uint8))
+    # Optimizasyon: Küçültülmüş çözünürlüğe uygun morfoloji çekirdek boyutları
+    open_kernel_size = max(1, 5 // DOWN_SCALE)
+    close_kernel_size = max(1, 11 // DOWN_SCALE)
+    if open_kernel_size % 2 == 0:
+        open_kernel_size += 1
+    if close_kernel_size % 2 == 0:
+        close_kernel_size += 1
+
+    roi_mask = cv2.morphologyEx(roi_mask, cv2.MORPH_OPEN, np.ones((open_kernel_size, open_kernel_size), dtype=np.uint8))
+    roi_mask = cv2.morphologyEx(roi_mask, cv2.MORPH_CLOSE, np.ones((close_kernel_size, close_kernel_size), dtype=np.uint8))
 
     full_mask = np.zeros((height, width), dtype=np.uint8)
     full_mask[roi_start_y:] = roi_mask
@@ -183,22 +195,34 @@ def split_regions_with_watershed(image, foreground_mask):
         if area < 0.0004 * height * width:
             continue
 
-        component_mask = components == component_id
-        local_distance = distance * component_mask.astype(np.float32)
-        maximum_distance = float(local_distance.max())
+        # Optimizasyon: Büyük resim (640x360) yerine adayın sınır kutusunda (crop) işlem yapıyoruz.
+        x_start, y_start = max(0, _x), max(0, _y)
+        x_end, y_end = min(width, _x + _w), min(height, _y + _h)
+
+        crop_comp = components[y_start:y_end, x_start:x_end]
+        crop_dist = distance[y_start:y_end, x_start:x_end]
+
+        component_mask_cropped = (crop_comp == component_id)
+        local_distance_cropped = crop_dist * component_mask_cropped.astype(np.float32)
+        maximum_distance = float(local_distance_cropped.max())
 
         if maximum_distance < 2:
             continue
 
-        sure_foreground = (local_distance > 0.35 * maximum_distance).astype(np.uint8) * 255
-        sure_foreground = cv2.morphologyEx(sure_foreground, cv2.MORPH_OPEN, np.ones((5, 5), dtype=np.uint8))
+        sure_foreground_cropped = (local_distance_cropped > 0.35 * maximum_distance).astype(np.uint8) * 255
+        sure_foreground_cropped = cv2.morphologyEx(
+            sure_foreground_cropped,
+            cv2.MORPH_OPEN,
+            np.ones((max(1, 5 // DOWN_SCALE), max(1, 5 // DOWN_SCALE)), dtype=np.uint8)
+        )
 
-        seed_count, seeds = cv2.connectedComponents(sure_foreground)
+        seed_count, seeds_cropped = cv2.connectedComponents(sure_foreground_cropped)
         for seed_id in range(1, seed_count):
-            seed_mask = seeds == seed_id
-            if np.count_nonzero(seed_mask) < 50:
+            seed_mask_cropped = (seeds_cropped == seed_id)
+            # Alan sınırını küçültme oranının karesi ile orantılı azaltıyoruz
+            if np.count_nonzero(seed_mask_cropped) < (50 / (DOWN_SCALE ** 2)):
                 continue
-            markers[seed_mask] = next_label
+            markers[y_start:y_end, x_start:x_end][seed_mask_cropped] = next_label
             next_label += 1
 
     if next_label == 1:
@@ -215,7 +239,8 @@ def split_regions_with_watershed(image, foreground_mask):
         if area == 0:
             continue
 
-        contours, _ = cv2.findContours(region_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours_result = cv2.findContours(region_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = contours_result[1] if len(contours_result) == 3 else contours_result[0]
         if not contours:
             continue
 
@@ -329,7 +354,9 @@ def grabcut_candidate(image, box):
 
 def evaluate_candidate(image, region):
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    foreground_mask = grabcut_candidate(image, region["box"])
+    foreground_mask = None
+    if USE_GRABCUT:
+        foreground_mask = grabcut_candidate(image, region["box"])
 
     if foreground_mask is None:
         foreground_mask = region["mask"].copy()
@@ -430,6 +457,11 @@ def make_square_box(box, image_shape):
 
 def detect_darkest_stone(image):
     foreground_mask, roi_start_y = build_foreground_mask(image)
+    
+    # Optimizasyon: Maske tamamen boş ise Watershed çalıştırmadan erken çık
+    if cv2.countNonZero(foreground_mask) == 0:
+        return None, foreground_mask
+        
     regions = split_regions_with_watershed(image, foreground_mask)
 
     regions = [r for r in regions if is_valid_region(r, image.shape, roi_start_y)]
@@ -540,7 +572,14 @@ while True:
             time.sleep(0.03)
             continue
 
-        result, debug_mask = detect_darkest_stone(frame)
+        # Downscale for performance
+        if DOWN_SCALE > 1:
+            h, w = frame.shape[:2]
+            proc_frame = cv2.resize(frame, (w // DOWN_SCALE, h // DOWN_SCALE))
+        else:
+            proc_frame = frame
+
+        result, debug_mask = detect_darkest_stone(proc_frame)
 
         visible = False
         angle_val = 0.0
@@ -550,6 +589,16 @@ while True:
 
         if result is not None:
             x1, y1, x2, y2, center_x, center_y = result["square_box"]
+            
+            # Scale coordinates back to original size
+            if DOWN_SCALE > 1:
+                x1 *= DOWN_SCALE
+                y1 *= DOWN_SCALE
+                x2 *= DOWN_SCALE
+                y2 *= DOWN_SCALE
+                center_x *= DOWN_SCALE
+                center_y *= DOWN_SCALE
+
             box_width = x2 - x1 + 1
 
             # Açısal sapma hesabı

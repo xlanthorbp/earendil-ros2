@@ -28,7 +28,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'turn_test = earendil_bot.tests.turn_test:main',
+            'heading_test = earendil_bot.tests.heading_test:main',
             'hardware_bridge = earendil_bot.bridge.hardware_bridge:main',
             'gps_nav_test = earendil_bot.tests.gps_nav_test:main',
             'base_exit = earendil_bot.tests.base_exit:main',
@@ -39,6 +39,7 @@ setup(
             'tunnel_test2 = earendil_bot.tests.tunnel_test2:main',
             'tunnel_test3 = earendil_bot.tests.tunnel_test3:main',
             'tunnel_test4 = earendil_bot.tests.tunnel_test4:main',
+            'tunnel_test5 = earendil_bot.tests.tunnel_test5:main',
             'aruco_receiver = earendil_bot.tests.aruco_receiver:main',
             'rock_receiver = earendil_bot.tests.rock_receiver:main',
         ],

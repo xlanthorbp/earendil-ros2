@@ -35,6 +35,10 @@ BOX_MARGIN_RATIO = 0.10
 
 SAVE_DEBUG_MASKS = True
 
+# Optimizasyon Ayarları
+USE_GRABCUT = False   # Yavas GrabCut adımını atla, dogrudan Watershed maskesini kullan
+DOWN_SCALE = 2        # Islem hızını artırmak icin goruntuyu bu oranda kucult
+
 
 # ============================================================
 # WINDOWS'TA TÜRKÇE KARAKTERLİ YOLLAR İÇİN GÖRSEL OKUMA/YAZMA
@@ -109,9 +113,9 @@ def build_foreground_mask(
     if len(pixels) == 0:
         return np.zeros((height, width), dtype=np.uint8), roi_start_y
 
-    max_samples = 30_000
+    max_samples = 8000
     if len(pixels) > max_samples:
-        rng = np.random.default_rng(0)
+        rng = np.random.RandomState(0)
         indices = rng.choice(len(pixels), max_samples, replace=False)
         samples = np.ascontiguousarray(pixels[indices], dtype=np.float32)
     else:
@@ -120,8 +124,8 @@ def build_foreground_mask(
     actual_cluster_count = min(cluster_count, len(samples))
     criteria = (
         cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-        50,
-        0.5,
+        15,
+        1.0,
     )
 
     _, labels, centers = cv2.kmeans(
@@ -129,7 +133,7 @@ def build_foreground_mask(
         actual_cluster_count,
         None,
         criteria,
-        5,
+        1,
         cv2.KMEANS_PP_CENTERS,
     )
 
@@ -158,15 +162,23 @@ def build_foreground_mask(
         cv2.THRESH_BINARY + cv2.THRESH_OTSU,
     )
 
+    # Optimizasyon: Küçültülmüş çözünürlüğe uygun morfoloji çekirdek boyutları
+    open_kernel_size = max(1, 5 // DOWN_SCALE)
+    close_kernel_size = max(1, 11 // DOWN_SCALE)
+    if open_kernel_size % 2 == 0:
+        open_kernel_size += 1
+    if close_kernel_size % 2 == 0:
+        close_kernel_size += 1
+
     roi_mask = cv2.morphologyEx(
         roi_mask,
         cv2.MORPH_OPEN,
-        np.ones((5, 5), dtype=np.uint8),
+        np.ones((open_kernel_size, open_kernel_size), dtype=np.uint8),
     )
     roi_mask = cv2.morphologyEx(
         roi_mask,
         cv2.MORPH_CLOSE,
-        np.ones((11, 11), dtype=np.uint8),
+        np.ones((close_kernel_size, close_kernel_size), dtype=np.uint8),
     )
 
     full_mask = np.zeros((height, width), dtype=np.uint8)
@@ -200,29 +212,34 @@ def split_regions_with_watershed(
         if area < 0.0004 * height * width:
             continue
 
-        component_mask = components == component_id
-        local_distance = distance * component_mask.astype(np.float32)
-        maximum_distance = float(local_distance.max())
+        # Optimizasyon: Büyük resim (640x360) yerine adayın sınır kutusunda (crop) işlem yapıyoruz.
+        x_start, y_start = max(0, _x), max(0, _y)
+        x_end, y_end = min(width, _x + _w), min(height, _y + _h)
+
+        crop_comp = components[y_start:y_end, x_start:x_end]
+        crop_dist = distance[y_start:y_end, x_start:x_end]
+
+        component_mask_cropped = (crop_comp == component_id)
+        local_distance_cropped = crop_dist * component_mask_cropped.astype(np.float32)
+        maximum_distance = float(local_distance_cropped.max())
 
         if maximum_distance < 2:
             continue
 
-        sure_foreground = (
-            local_distance > 0.35 * maximum_distance
-        ).astype(np.uint8) * 255
-
-        sure_foreground = cv2.morphologyEx(
-            sure_foreground,
+        sure_foreground_cropped = (local_distance_cropped > 0.35 * maximum_distance).astype(np.uint8) * 255
+        sure_foreground_cropped = cv2.morphologyEx(
+            sure_foreground_cropped,
             cv2.MORPH_OPEN,
-            np.ones((5, 5), dtype=np.uint8),
+            np.ones((max(1, 5 // DOWN_SCALE), max(1, 5 // DOWN_SCALE)), dtype=np.uint8)
         )
 
-        seed_count, seeds = cv2.connectedComponents(sure_foreground)
+        seed_count, seeds_cropped = cv2.connectedComponents(sure_foreground_cropped)
         for seed_id in range(1, seed_count):
-            seed_mask = seeds == seed_id
-            if np.count_nonzero(seed_mask) < 50:
+            seed_mask_cropped = (seeds_cropped == seed_id)
+            # Alan sınırını küçültme oranının karesi ile orantılı azaltıyoruz
+            if np.count_nonzero(seed_mask_cropped) < (50 / (DOWN_SCALE ** 2)):
                 continue
-            markers[seed_mask] = next_label
+            markers[y_start:y_end, x_start:x_end][seed_mask_cropped] = next_label
             next_label += 1
 
     if next_label == 1:
@@ -239,11 +256,12 @@ def split_regions_with_watershed(
         if area == 0:
             continue
 
-        contours, _ = cv2.findContours(
+        contours_result = cv2.findContours(
             region_mask,
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE,
         )
+        contours = contours_result[1] if len(contours_result) == 3 else contours_result[0]
         if not contours:
             continue
 
@@ -385,7 +403,9 @@ def grabcut_candidate(
 def evaluate_candidate(image: np.ndarray, region: dict) -> dict | None:
     """Küçük skor = daha koyu ve siyaha/griye daha yakın taş."""
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    foreground_mask = grabcut_candidate(image, region["box"])
+    foreground_mask = None
+    if USE_GRABCUT:
+        foreground_mask = grabcut_candidate(image, region["box"])
 
     if foreground_mask is None:
         foreground_mask = region["mask"].copy()
@@ -531,6 +551,11 @@ def detect_darkest_stone(
     image: np.ndarray,
 ) -> tuple[dict | None, np.ndarray]:
     foreground_mask, roi_start_y = build_foreground_mask(image)
+    
+    # Optimizasyon: Maske tamamen boş ise Watershed çalıştırmadan erken çık
+    if cv2.countNonZero(foreground_mask) == 0:
+         return None, foreground_mask
+         
     regions = split_regions_with_watershed(image, foreground_mask)
 
     regions = [
@@ -629,7 +654,14 @@ def main() -> None:
                 print(f"[HATA] Görüntü okunamadı: {image_path.name}")
                 continue
 
-            result, debug_mask = detect_darkest_stone(image)
+            # Downscale for performance
+            if DOWN_SCALE > 1:
+                h, w = image.shape[:2]
+                proc_image = cv2.resize(image, (w // DOWN_SCALE, h // DOWN_SCALE))
+            else:
+                proc_image = image
+
+            result, debug_mask = detect_darkest_stone(proc_image)
 
             if SAVE_DEBUG_MASKS:
                 debug_path = DEBUG_DIR / f"{image_path.stem}_mask.png"
@@ -640,6 +672,16 @@ def main() -> None:
                 continue
 
             x1, y1, x2, y2, center_x, center_y = result["square_box"]
+            
+            # Scale coordinates back to original size
+            if DOWN_SCALE > 1:
+                x1 *= DOWN_SCALE
+                y1 *= DOWN_SCALE
+                x2 *= DOWN_SCALE
+                y2 *= DOWN_SCALE
+                center_x *= DOWN_SCALE
+                center_y *= DOWN_SCALE
+
             annotated = image.copy()
 
             cv2.rectangle(

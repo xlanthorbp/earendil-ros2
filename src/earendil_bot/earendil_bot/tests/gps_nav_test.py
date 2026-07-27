@@ -6,7 +6,7 @@
 GPS Nav Test Node
 -----------------------------------------
 Navigates the robot to a target GPS coordinate dynamically based on real-time
-GPS data and IMU heading.
+GPS data (/gps/fix) and Magnetometer heading (/mag/heading).
 
 Usage:
   ros2 run earendil_bot gps_nav_test --ros-args \
@@ -14,7 +14,8 @@ Usage:
 """
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Imu, NavSatFix
+from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import Float32
 from geometry_msgs.msg import Twist
 import math
 import time
@@ -30,54 +31,55 @@ class GpsNavTest(Node):
         self.declare_parameter('target_lon', 0.0)
 
         # Speed limits and tolerances
-        self.declare_parameter('heading_tolerance', 0.122)  # ~7.0 degrees
-        self.declare_parameter('arrival_radius', 0.5)       # 0.5 meters (user confirmation)
-        self.declare_parameter('max_linear_x', 0.6)         # Forward max speed
-        self.declare_parameter('max_angular_z', 1.0)        # Turning max speed
+        self.declare_parameter('heading_tolerance_deg', 7.0) # degrees
+        self.declare_parameter('arrival_radius', 0.5)        # 0.5 meters (user confirmation)
+        self.declare_parameter('max_linear_x', 0.6)          # Forward max speed
+        self.declare_parameter('max_angular_z', 1.0)         # Turning max speed
+        self.declare_parameter('kp_angular', 2.5)            # P-gain for rotation phase
+        self.declare_parameter('kp_lane', 1.5)               # P-gain for lane keeping while driving
         self.declare_parameter('invert_turn', False)
         self.declare_parameter('dry_run', False)
 
         self.target_lat = self.get_parameter('target_lat').value
         self.target_lon = self.get_parameter('target_lon').value
-        self.heading_tol = self.get_parameter('heading_tolerance').value
+        heading_tol_deg = self.get_parameter('heading_tolerance_deg').value
+        self.heading_tol = math.radians(heading_tol_deg)
         self.arrival_radius = self.get_parameter('arrival_radius').value
         self.max_linear_x = self.get_parameter('max_linear_x').value
         self.max_angular_z = self.get_parameter('max_angular_z').value
+        self.kp_angular = self.get_parameter('kp_angular').value
+        self.kp_lane = self.get_parameter('kp_lane').value
         self.invert_turn = self.get_parameter('invert_turn').value
         self.dry_run = self.get_parameter('dry_run').value
 
         self.get_logger().info(f"Target Waypoint: ({self.target_lat:.6f}, {self.target_lon:.6f})")
         self.get_logger().info(f"Arrival Radius: {self.arrival_radius}m")
-        self.get_logger().info(f"Waiting for GPS on /gps/fix and IMU on /imu/data ...")
+        self.get_logger().info(f"Heading Tolerance: {heading_tol_deg:.1f}°")
+        self.get_logger().info(f"Waiting for GPS on /gps/fix and Magnetometer on /mag/heading ...")
 
         # State Variables
         self.current_lat = None
         self.current_lon = None
-        self.imu_heading = None
+        self.mag_heading = None
         
-        self.last_imu_time = 0.0
+        self.last_mag_time = 0.0
         self.last_gps_time = 0.0
         
         self.aligned = False      # Is the vehicle aligned to target?
         self.arrived = False      # Has the vehicle arrived at target?
 
         # Publisher & Subscriber
-        # Motor bridge listens to cmd_vel, if twist_mux is present it's cmd_vel_nav.
-        # We publish to cmd_vel_nav directly, if not working it can be changed to cmd_vel.
-        # It was specified that twist_mux is used by default.
         self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
-        self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
+        self.create_subscription(Float32, '/mag/heading', self.mag_cb, 10)
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
 
         # Control loop 10 Hz
         self.timer = self.create_timer(0.1, self.control_loop)
 
-    def imu_cb(self, msg: Imu):
-        q = msg.orientation
-        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        self.imu_heading = math.atan2(siny_cosp, cosy_cosp)
-        self.last_imu_time = time.time()
+    def mag_cb(self, msg: Float32):
+        # /mag/heading publishes heading in degrees (0-360)
+        self.mag_heading = math.radians(msg.data)
+        self.last_mag_time = time.time()
 
     def gps_cb(self, msg: NavSatFix):
         self.current_lat = msg.latitude
@@ -94,13 +96,13 @@ class GpsNavTest(Node):
             self.get_logger().warn("Target coordinates not entered! (0.0, 0.0). Waiting...", throttle_duration_sec=3.0)
             return
 
-        if self.imu_heading is None or (time.time() - self.last_imu_time > 1.5):
-            self.get_logger().warn("Waiting for IMU data or connection lost!", throttle_duration_sec=2.0)
+        if self.mag_heading is None or (time.time() - self.last_mag_time > 1.5):
+            self.get_logger().warn("Waiting for Magnetometer data (/mag/heading) or connection lost!", throttle_duration_sec=2.0)
             self.stop_robot(cmd)
             return
 
         if self.current_lat is None or (time.time() - self.last_gps_time > 2.0):
-            self.get_logger().warn("Waiting for GPS data or connection lost!", throttle_duration_sec=2.0)
+            self.get_logger().warn("Waiting for GPS data (/gps/fix) or connection lost!", throttle_duration_sec=2.0)
             self.stop_robot(cmd)
             return
 
@@ -116,19 +118,20 @@ class GpsNavTest(Node):
             return
 
         # Heading Error (Radians)
-        error = angle_error_rad(target_bearing, self.imu_heading)
+        error = angle_error_rad(target_bearing, self.mag_heading)
 
         self.get_logger().info(
             f"Distance: {distance:.1f}m | "
-            f"Angle Error: {math.degrees(error):.1f}° | "
+            f"Target Bearing: {math.degrees(target_bearing):.1f}° | "
+            f"MAG: {math.degrees(self.mag_heading):.1f}° | "
+            f"Error: {math.degrees(error):.1f}° | "
             f"State: {'DRIVING' if self.aligned else 'ROTATING'}", throttle_duration_sec=1.0)
 
         # PHASE 1: Rotate to Target (Rotate phase)
         if not self.aligned:
             if abs(error) > self.heading_tol:
                 # Rotate in place (PID logic: proportional to error)
-                kp_angular = 2.5
-                angular_vel = kp_angular * error
+                angular_vel = self.kp_angular * error
                 
                 # Limit
                 if angular_vel > self.max_angular_z: angular_vel = self.max_angular_z
@@ -151,7 +154,7 @@ class GpsNavTest(Node):
             else:
                 # Make small corrections while driving forward
                 cmd.linear.x = self.max_linear_x
-                cmd.angular.z = 1.5 * error  # Lane keeping Kp
+                cmd.angular.z = self.kp_lane * error  # Lane keeping Kp
                 
                 # Z limit (If needed)
                 if cmd.angular.z > self.max_angular_z: cmd.angular.z = self.max_angular_z
@@ -185,3 +188,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+

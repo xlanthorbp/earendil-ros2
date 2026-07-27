@@ -1,56 +1,91 @@
+# tunnel_params.yaml - Earendil Bot Tünel Otonom Navigasyon Test Parametreleri
+
+# ---------------------------------------------------------
+# Tünel Test 1: Temel Duvar Takibi ve Tünel Seyri (test1)
+# ---------------------------------------------------------
 test1:
   ros__parameters:
-    forward_speed_approach: 0.2
-    forward_speed_tunnel: 0.2
-    safety_speed: 0.1
-    kp: 0.5
-    kd: 1.0
-    safety_threshold: 0.25
-    tunnel_detection_threshold: 1.0
-    window_deg: 10.0
-    ir_height: 1.0
-    ir_limit: 1.49
+    forward_speed_approach: 0.2     # Tünel girişine yaklaşma hızı [m/s]
+    forward_speed_tunnel: 0.2       # Tünel içindeki otonom seyir hızı [m/s]
+    safety_speed: 0.1               # Engellere/duvarlara yaklaşıldığındaki emniyet hızı [m/s]
+    kp: 0.5                         # Duvar takibi Orantısal (P) kontrolör kazancı
+    kd: 1.0                         # Duvar takibi Türevsel (D) kontrolör kazancı
+    safety_threshold: 0.25          # Çarpmayı önleme minimum emniyet mesafesi [metre]
+    tunnel_detection_threshold: 1.0 # Tünel içinde olduğunu anlama mesafe eşiği [metre]
+    window_deg: 10.0                # Lidar duvar tespiti için açısal tarama penceresi genişliği [derece]
+    ir_height: 1.0                  # Tavan IR yükseklik sensörü montaj yüksekliği [metre]
+    ir_limit: 1.49                  # IR tavan tespiti maksimum mesafe limiti [metre]
 
+# ---------------------------------------------------------
+# Tünel Test 2: ArUco Destekli Tünel Girişi ve Seyri (test2)
+# ---------------------------------------------------------
 test2:
   ros__parameters:
-    forward_speed_approach: 0.2
-    forward_speed_tunnel: 0.2
-    safety_speed: 0.1
-    kp: 0.5
-    kd: 1.0
-    kp_aruco: 0.02
-    safety_threshold: 0.25
-    tunnel_detection_threshold: 1.0
-    window_deg: 10.0
-    ir_height: 1.0
-    ir_limit: 1.49
+    forward_speed_approach: 0.2     # Yaklaşma hızı [m/s]
+    forward_speed_tunnel: 0.2       # Tünel içi hız [m/s]
+    safety_speed: 0.1               # Emniyet hızı [m/s]
+    kp: 0.5                         # Lidar P kazancı
+    kd: 1.0                         # Lidar D kazancı
+    kp_aruco: 0.02                  # ArUco etiketine göre merkezleme P kazancı
+    safety_threshold: 0.25          # Güvenlik mesafe eşiği [metre]
+    tunnel_detection_threshold: 1.0 # Tünel algılama eşiği [metre]
+    window_deg: 10.0                # Lidar tarama penceresi [derece]
+    ir_height: 1.0                  # IR sensör yüksekliği [metre]
+    ir_limit: 1.49                  # IR limit mesafesi [metre]
 
+# ---------------------------------------------------------
+# Tünel Test 3: Gelişmiş ArUco ve Lidar Füzyonu (test3)
+# ---------------------------------------------------------
 test3:
   ros__parameters:
-    forward_speed_approach: 0.2
-    forward_speed_tunnel: 0.2
-    safety_speed: 0.1
-    kp: 0.5
-    kd: 1.0
-    kp_aruco: 0.02
-    safety_threshold: 0.25
-    tunnel_detection_threshold: 1.0
-    window_deg: 10.0
-    ir_height: 1.0
-    ir_limit: 1.49
+    forward_speed_approach: 0.2     # Yaklaşma hızı [m/s]
+    forward_speed_tunnel: 0.2       # Tünel içi hız [m/s]
+    safety_speed: 0.1               # Emniyet hızı [m/s]
+    kp: 0.5                         # Lidar duvar takibi P kazancı
+    kd: 1.0                         # Lidar duvar takibi D kazancı
+    kp_aruco: 0.02                  # ArUco hizalama P kazancı
+    safety_threshold: 0.25          # Emniyet mesafe sınırı [metre]
+    tunnel_detection_threshold: 1.0 # Tünel tespiti mesafe sınırı [metre]
+    window_deg: 10.0                # Açısal pencere genişliği [derece]
+    ir_height: 1.0                  # Tavan sensörü yüksekliği [metre]
+    ir_limit: 1.49                  # Tavan sensörü limiti [metre]
 
+# ---------------------------------------------------------
+# Tünel Test 4: Genişlik Ayarlı ve ArUco Hizalamalı Seyir (test4)
+# ---------------------------------------------------------
 test4:
   ros__parameters:
-    forward_speed_approach: 0.2
-    forward_speed_tunnel: 0.2
-    safety_speed: 0.1
-    kp: 0.5
-    kd: 1.0
-    kp_aruco: 0.02
-    kp_width: 0.5
-    safety_threshold: 0.25
-    tunnel_detection_threshold: 1.0
-    window_deg: 10.0
-    ir_height: 1.0
-    ir_limit: 1.49
+    forward_speed_approach: 0.2     # Yaklaşma hızı [m/s]
+    forward_speed_tunnel: 0.2       # Tünel içi hız [m/s]
+    safety_speed: 0.1               # Emniyet hızı [m/s]
+    kp: 0.5                         # Lidar P kazancı
+    kd: 1.0                         # Lidar D kazancı
+    kp_aruco: 0.02                  # ArUco açı düzeltme P kazancı
+    kp_width: 0.5                   # İki ArUco arası genişlik farkı P kazancı
+    safety_threshold: 0.25          # Emniyet mesafesi [metre]
+    tunnel_detection_threshold: 1.0 # Tünel algılama mesafesi [metre]
+    window_deg: 10.0                # Tarama penceresi [derece]
+    ir_height: 1.0                  # IR sensör yüksekliği [metre]
+    ir_limit: 1.49                  # IR limit mesafesi [metre]
+
+# ---------------------------------------------------------
+# Tünel Test 5: Tam Otomatik Arama, Dönüş ve Giriş Algoritması (test5)
+# ---------------------------------------------------------
+test5:
+  ros__parameters:
+    forward_speed_approach: 0.2     # Yaklaşma ve arama hızı [m/s]
+    forward_speed_tunnel: 0.2       # Tünel içi otonom sürüş hızı [m/s]
+    safety_speed: 0.1               # Emniyet yavaşlama hızı [m/s]
+    kp: 0.5                         # Lidar duvar koruma P kazancı
+    kd: 1.0                         # Lidar duvar koruma D kazancı
+    kp_aruco: 0.02                  # ArUco etiket merkezleme P kazancı
+    kp_width: 0.5                   # Giriş genişliği dengeleme P kazancı
+    kp_turn: 0.8                    # Tünel girişine yönelme/dönüş P kazancı
+    safety_threshold: 0.25          # Emniyet mesafe sınırı [metre]
+    tunnel_detection_threshold: 1.0 # Tünel tespiti kritik mesafe eşiği [metre]
+    window_deg: 10.0                # Lidar duvar ölçüm penceresi [derece]
+    ir_height: 1.0                  # Tavan IR sensör monte yüksekliği [metre]
+    ir_limit: 1.49                  # Tavan tespiti mesafe üst sınırı [metre]
+
+
 

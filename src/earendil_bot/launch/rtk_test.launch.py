@@ -48,7 +48,8 @@ def generate_launch_description():
                 hardware_params,
                 {
                     'target_lat': target_lat_launch_conf,
-                    'target_lon': target_lon_launch_conf
+                    'target_lon': target_lon_launch_conf,
+                    'enable_test_flow': True
                 }
             ]
         ),

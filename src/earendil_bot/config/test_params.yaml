@@ -1,11 +1,49 @@
-# Configuration file
-# This file can be read by test nodes during launch.
+# test_params.yaml - Earendil Bot Test Düğümleri Parametre Konfigürasyonu
 
-test_nodes:
+# ---------------------------------------------------------
+# Magnetometer Açı Dönüş Test Düğümü (heading_test)
+# ---------------------------------------------------------
+heading_test:
   ros__parameters:
-    heading_tolerance_rad: 0.15      # radians (approx 8.5 degrees)
-    heading_tolerance_deg: 8.5       # degrees
-    arrival_radius: 2.0              # meters
-    turn_speed: 0.25                  # rad/s
-    drive_speed: 0.5                 # m/s
-    steer_kp: 0.3                    # Proportional steering coefficient
+    target_heading: 0.0              # Hedef açı [derece] (0.0 - 360.0 derece arası mutlak baş açısı)
+    heading_tolerance_deg: 8.5       # Açısal tolerans [derece] (Bu tolerans sınırında dönüş tamamlanır)
+    turn_speed: 0.5                  # Maksimum açısal dönüş hızı [rad/s]
+    kp_angular: 2.0                  # Dönüş hızı Orantısal (P) kontrolör katsayısı
+    invert_turn: false               # Dönüş yönünü tersine çevir (true: sağ/sol yönü terslenir)
+    dry_run: false                   # Test/Simülasyon modu (true: motorlara fiziksel hız gönderilmez)
+
+# ---------------------------------------------------------
+# GPS & Magnetometer Otonom Navigasyon Test Düğümü (gps_nav_test)
+# ---------------------------------------------------------
+gps_nav_test:
+  ros__parameters:
+    target_lat: 0.0                  # Hedef GPS enlemi (Latitude, örn: 39.925000)
+    target_lon: 0.0                  # Hedef GPS boylamı (Longitude, örn: 32.836000)
+    heading_tolerance_deg: 7.0       # Hedef açıya hizalanma toleransı [derece]
+    arrival_radius: 0.5              # Hedefe varış yarıçapı [metre] (Bu yarıçap içinde varıldı kabul edilir)
+    max_linear_x: 0.6                # Maksimum ileri sürüş hızı [m/s]
+    max_angular_z: 1.0               # Maksimum açısal dönüş hızı [rad/s]
+    kp_angular: 2.5                  # Yerinde dönüş aşamasındaki P-kontrolör kazancı
+    kp_lane: 1.5                     # İleri sürüş esnasındaki şerit/açı koruma P-kontrolör kazancı
+    invert_turn: false               # Dönüş yönü tersleme seçeneği
+    dry_run: false                   # Simülasyon modu (Motor komutu vermeden loglama)
+
+# ---------------------------------------------------------
+# Üsten/Çadırdan Çıkış Test Düğümü (base_exit_node)
+# ---------------------------------------------------------
+base_exit_node:
+  ros__parameters:
+    forward_speed: 0.2               # Üsten çıkış sırasındaki düz sürüş hızı [m/s]
+    clear_threshold: 1.5             # Ön alanın engelden temiz kabul edilme kritik mesafesi [metre]
+    arc_degrees: 120.0               # Lidar tarama açısı [derece] (+/-120° = toplam 240° taranır)
+
+# ---------------------------------------------------------
+# Üsse/Çadıra Giriş Test Düğümü (base_enter_node)
+# ---------------------------------------------------------
+base_enter_node:
+  ros__parameters:
+    approach_speed: 0.2              # Üsse yaklaşma hızı [m/s]
+    enter_speed: 0.1                 # Üs içine girerken kullanılan yavaş/hassas sürüş hızı [m/s]
+    target_distance: 0.5             # Üs içinde durulacak hedef engel mesafesi [metre]
+
+

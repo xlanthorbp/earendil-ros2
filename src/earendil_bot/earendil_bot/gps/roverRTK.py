@@ -4,12 +4,14 @@
 import serial
 import time
 import threading
+import sys
 from collections import Counter
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import Twist
+from std_msgs.msg import String
 
 from earendil_bot.gps.gps_math import bearing_between_gps_deg, haversine, angle_error_deg
 
@@ -193,6 +195,37 @@ def parse_gga(line: str):
         return None
 
 
+def parse_rmc(line: str):
+    """
+    $GNRMC,time,status,lat,N,lon,E,speed,track,date,...
+    status: 'A' = Valid, 'V' = Invalid
+    """
+    try:
+        body = line[1:].split("*")[0]
+        parts = body.split(",")
+
+        if not parts[0].endswith("RMC"):
+            return None
+
+        utc = parts[1]
+        status = parts[2]
+        lat = nmea_latlon_to_decimal(parts[3], parts[4])
+        lon = nmea_latlon_to_decimal(parts[5], parts[6])
+        quality = 1 if status == "A" else 0
+
+        return {
+            "utc": utc,
+            "lat": lat,
+            "lon": lon,
+            "quality": quality,
+            "sats": 0,
+            "hdop": 0.0,
+            "alt": 0.0,
+        }
+    except Exception:
+        return None
+
+
 def quality_text(q: int) -> str:
     if q == 4:
         return "RTK (FIXED - Hassas)"
@@ -231,7 +264,7 @@ class RoverRTKNode(Node):
         self.declare_parameter('gps_port', '/dev/ttyUSB0')
         self.declare_parameter('radio_port', '/dev/ttyUSB1')
         self.declare_parameter('gps_baud', 460800)
-        self.declare_parameter('radio_baud', 57600)
+        self.declare_parameter('radio_baud', 115200)
         self.declare_parameter('configure_rover', True)
         self.declare_parameter('min_pwm', 60)
         self.declare_parameter('max_pwm', 90)
@@ -239,6 +272,11 @@ class RoverRTKNode(Node):
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('target_lat', 0.0)
         self.declare_parameter('target_lon', 0.0)
+        self.declare_parameter('enable_test_flow', False)
+        self.declare_parameter('map_link_print_interval', 3.0)
+        self.declare_parameter('map_link_topic', '/gps/map_link')
+        self.declare_parameter('fallback_lat', 39.925000)
+        self.declare_parameter('fallback_lon', 32.836000)
 
         self.gps_port = self.get_parameter('gps_port').value
         self.radio_port = self.get_parameter('radio_port').value
@@ -251,6 +289,11 @@ class RoverRTKNode(Node):
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
         self.target_lat_param = self.get_parameter('target_lat').value
         self.target_lon_param = self.get_parameter('target_lon').value
+        self.enable_test_flow = self.get_parameter('enable_test_flow').value
+        self.map_link_print_interval = float(self.get_parameter('map_link_print_interval').value)
+        self.map_link_topic = self.get_parameter('map_link_topic').value
+        self.fallback_lat = float(self.get_parameter('fallback_lat').value)
+        self.fallback_lon = float(self.get_parameter('fallback_lon').value)
 
         # Fallbacks for hardware_params.yaml default dummy placeholders
         if "ttyUSBx" in self.gps_port:
@@ -273,7 +316,11 @@ class RoverRTKNode(Node):
 
         # ROS Publishers
         self.gps_pub = self.create_publisher(NavSatFix, '/gps/fix', 10)
+        self.map_link_pub = self.create_publisher(String, self.map_link_topic, 10)
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+
+        # Timer to ALWAYS publish and print Google Maps link every 3 seconds
+        self.create_timer(self.map_link_print_interval, self.publish_map_link_timer_cb)
 
         # Serial Connections
         self.get_logger().info(f"[ROVER] Starting serial connections...")
@@ -310,32 +357,62 @@ class RoverRTKNode(Node):
         self.t_rf_to_gps.start()
         self.t_gps_read.start()
 
-        # Background test sequence thread
-        self.t_test_flow = threading.Thread(
-            target=self.run_test_flow,
-            daemon=True
-        )
-        self.t_test_flow.start()
+        # Background test sequence thread (only if enabled)
+        if self.enable_test_flow:
+            self.get_logger().info("[ROVER] Otonom navigasyon test akışı başlatılıyor...")
+            self.t_test_flow = threading.Thread(
+                target=self.run_test_flow,
+                daemon=True
+            )
+            self.t_test_flow.start()
+        else:
+            self.get_logger().info("[ROVER] Otonom navigasyon testi kapalı. Sadece GPS verisi ve Harita linki yayınlanıyor.")
+
+    def publish_map_link_timer_cb(self):
+        disp_lat = self.current_lat if self.current_lat is not None else self.fallback_lat
+        disp_lon = self.current_lon if self.current_lon is not None else self.fallback_lon
+
+        osm_link, google_link = make_map_links(disp_lat, disp_lon)
+        link_msg = String()
+        link_msg.data = google_link
+        self.map_link_pub.publish(link_msg)
+
+        if not self.logging_muted:
+            if self.has_fix:
+                self.get_logger().info(f"[GPS LİNK - CANLI RTK KONUM] Google Harita: {google_link}")
+            else:
+                self.get_logger().info(f"[GPS LİNK - FIX BEKLENİYOR] Google Harita: {google_link}")
 
     def configure_rover_gps(self) -> None:
-        self.get_logger().info("[GPS KONFİG] LC29HEA alıcı ayarları gönderiliyor...")
-        self.send_cmd("PQTMCFGRCVRMODE,W,1")
+        self.get_logger().info("[GPS KONFİG] LC29HEA alıcı ayarları Rover (Gezgin) moduna alınıyor...")
+        # 1. Modu sıfırlamak için önce Standby/Normal (0), ardından Rover (1) moduna al
+        self.send_cmd("PQTMCFGRCVRMODE,W,0", wait=0.4)
+        self.send_cmd("PQTMCFGRCVRMODE,W,1", wait=0.4)
         self.send_cmd("PQTMSAVEPAR", 0.5)
+        # 2. Gereksiz NMEA cümlelerini kapat, GGA ve RMC'yi aç
         self.send_cmd("PAIR062,2,0")  # GSA off
         self.send_cmd("PAIR062,3,0")  # GSV off
         self.send_cmd("PAIR062,5,0")  # VTG off
         self.send_cmd("PQTMCFGNMEADP,W,3,6,3,2,3,2")
         self.send_cmd("PAIR050,200")  # 5 Hz
-        self.send_cmd("PAIR062,0,01")  # GGA on
-        self.send_cmd("PQTMSAVEPAR", 0.5)
-        self.get_logger().info("[GPS KONFİG] Ayarlar başarıyla gönderildi ve kaydedildi.")
+        self.send_cmd("PAIR062,0,1")   # GGA on
+        self.send_cmd("PAIR062,4,1")   # RMC on
+        self.send_cmd("PQTMSAVEPAR", 1.0)
+        self.get_logger().info("[GPS KONFİG] Rover modu ayarları başarıyla gönderildi ve Flash hafızaya kaydedildi.")
 
-    def send_cmd(self, body: str, wait: float = 0.25) -> None:
+    def send_cmd(self, body: str, wait: float = 0.3) -> None:
         cmd = make_cmd(body)
-        self.get_logger().info(f"[GPS CMD] Komut gönderildi: {cmd.decode().strip()}")
+        self.get_logger().info(f"[GPS CMD] Send -> {cmd.decode().strip()}")
         self.gps.write(cmd)
         self.gps.flush()
         time.sleep(wait)
+        try:
+            while self.gps.in_waiting:
+                resp = self.gps.readline().decode("ascii", errors="ignore").strip()
+                if resp:
+                    self.get_logger().info(f"   [GPS YANIT] <- {resp}")
+        except Exception:
+            pass
 
     def rf_to_gps_loop(self) -> None:
         rtcm = RTCMExtractor()
@@ -375,29 +452,48 @@ class RoverRTKNode(Node):
     def gps_read_loop(self) -> None:
         nmea = NMEALineParser()
         last_map_print = 0.0
+        last_read_time = time.time()
+        last_warn_time = 0.0
+        last_raw_debug = 0.0
 
         while not self.stop_flag.is_set() and rclpy.ok():
             try:
                 data = self.gps.read(4096)
+                now = time.time()
                 if not data:
+                    if (now - last_read_time > 5.0) and (now - last_warn_time > 5.0):
+                        last_warn_time = now
+                        self.get_logger().warning(
+                            f"[GPS UYARI] {self.gps_port} ({self.gps_baud} baud) portundan veri okunamadı. USB kablosunu kontrol edin."
+                        )
                     continue
+                last_read_time = now
+
+                lines = nmea.feed(data)
+                if not lines and (now - last_raw_debug > 5.0):
+                    last_raw_debug = now
+                    self.get_logger().info(
+                        f"[GPS HAM TEŞHİS] {self.gps_port} portundan {len(data)} bayt okundu. Ham veri örneği: {data[:50]}"
+                    )
             except Exception as e:
                 self.get_logger().error(f"[GPS HATA] Okuma hatası: {e}")
                 time.sleep(0.5)
                 continue
 
-            for line in nmea.feed(data):
-                if line.startswith("$G") and "GGA" in line:
-                    gga = parse_gga(line)
-                    if gga is None:
-                        continue
+            for line in lines:
+                gga_or_rmc = None
+                if "GGA" in line:
+                    gga_or_rmc = parse_gga(line)
+                elif "RMC" in line:
+                    gga_or_rmc = parse_rmc(line)
 
-                    q = gga["quality"]
-                    lat = gga["lat"]
-                    lon = gga["lon"]
-                    alt = gga["alt"]
-                    sats = gga["sats"]
-                    hdop = gga["hdop"]
+                if gga_or_rmc is not None:
+                    q = gga_or_rmc["quality"]
+                    lat = gga_or_rmc["lat"]
+                    lon = gga_or_rmc["lon"]
+                    alt = gga_or_rmc["alt"]
+                    sats = gga_or_rmc["sats"]
+                    hdop = gga_or_rmc["hdop"]
 
                     if lat is not None and lon is not None:
                         self.current_lat = lat
@@ -429,22 +525,32 @@ class RoverRTKNode(Node):
 
                         self.gps_pub.publish(fix_msg)
 
+                    # Determine display coordinates (real GPS position if available, else fallback/last known)
+                    disp_lat = lat if lat is not None else (self.current_lat if self.current_lat is not None else self.fallback_lat)
+                    disp_lon = lon if lon is not None else (self.current_lon if self.current_lon is not None else self.fallback_lon)
+
+                    osm_link, google_link = make_map_links(disp_lat, disp_lon)
+                    link_msg = String()
+                    link_msg.data = google_link
+                    self.map_link_pub.publish(link_msg)
+
                     now = time.time()
                     quality_changed = (q != self.last_logged_quality)
-                    if not self.logging_muted and (quality_changed or (now - last_map_print >= 10.0)):
+                    if not self.logging_muted and (quality_changed or (now - last_map_print >= self.map_link_print_interval)):
                         last_map_print = now
                         self.last_logged_quality = q
                         if lat is not None and lon is not None:
-                            osm_link, google_link = make_map_links(lat, lon)
                             self.get_logger().info(
                                 f"[GPS VERİSİ] Kalite: {quality_text(q)} | Enlem: {lat:.8f}, Boylam: {lon:.8f} | Yükseklik: {alt}m | Uydu: {sats} | HDOP: {hdop}"
                             )
-                            self.get_logger().info(f"[GPS LİNK] Google Harita: {google_link}")
-                            self.get_logger().info(f"[GPS LİNK] OpenStreetMap: {osm_link}")
+                            self.get_logger().info(f"[GPS LİNK - CANLI KONUM] Google Harita: {google_link}")
+                            self.get_logger().info(f"[GPS LİNK - CANLI KONUM] OpenStreetMap: {osm_link}")
                         else:
+                            status_tag = "SON BİLİNEN KONUM" if self.current_lat is not None else "FIX BEKLENİYOR - ÖRNEK KONUM"
                             self.get_logger().info(
-                                f"[GPS VERİSİ] Kalite: {quality_text(q)} | Sinyal zayıf (Koordinat yok) | Uydu: {sats} | HDOP: {hdop}"
+                                f"[GPS VERİSİ] Kalite: {quality_text(q)} | Sinyal zayıf (Açık alana çıkarın) | Uydu: {sats} | HDOP: {hdop}"
                             )
+                            self.get_logger().info(f"[GPS LİNK - {status_tag}] Google Harita: {google_link}")
                 elif line.startswith("$PQTM"):
                     pass
 
@@ -513,10 +619,12 @@ class RoverRTKNode(Node):
                 best_quality = self.current_quality
                 best_hdop = self.current_hdop
 
+            _, gmaps_start = make_map_links(lat_start, lon_start)
             self.get_logger().info(
                 f"[TEST] Belirlenen En İyi Başlangıç Konumu (P_start): ({lat_start:.8f}, {lon_start:.8f}) "
                 f"| Kalite: {quality_text(best_quality)} | HDOP: {best_hdop}"
             )
+            self.get_logger().info(f"[TEST LİNK] P_start Google Harita: {gmaps_start}")
 
             # ADIM 2: 80 PWM ile 5 Saniye İleri Sür (Yön Vektörü Oluşturmak İçin)
             forward_duration = 5.0
@@ -546,7 +654,9 @@ class RoverRTKNode(Node):
                 lat_end = self.current_lat
                 lon_end = self.current_lon
 
+            _, gmaps_end = make_map_links(lat_end, lon_end)
             self.get_logger().info(f"[TEST] Bitiş Koordinatı (P_end): ({lat_end:.8f}, {lon_end:.8f})")
+            self.get_logger().info(f"[TEST LİNK] P_end Google Harita: {gmaps_end}")
 
             # ADIM 4: Yön Vektörünü Hesapla
             theta_start = bearing_between_gps_deg(lat_start, lon_start, lat_end, lon_end)
@@ -562,37 +672,46 @@ class RoverRTKNode(Node):
                 self.get_logger().info(f"[TEST] Parametrelerden alınan hedef koordinat kullanılıyor: ({target_lat:.8f}, {target_lon:.8f})")
             else:
                 self.logging_muted = True
-                while rclpy.ok():
-                    print("\n" + "="*50)
-                    print(" MANUEL HEDEF KOORDİNAT GİRİŞİ ")
-                    print("="*50)
-                    print(f"Mevcut RTK Kalitesi: {quality_text(self.current_quality)} ({self.current_sats} uydu)")
-                    print(f"Mevcut Konum: ({lat_end:.8f}, {lon_end:.8f})")
-                    print("Lütfen enlem ve boylamı aralarında virgül olacak şekilde girin.")
-                    print("Örnek: 39.925000, 32.836000")
-                    print("="*50)
-
-                    try:
-                        user_input = input("Hedef Koordinat (lat, lon): ")
-                        if not user_input.strip():
-                            continue
-                        lat_str, lon_str = user_input.split(",")
-                        target_lat = float(lat_str.strip())
-                        target_lon = float(lon_str.strip())
-                        break
-                    except KeyboardInterrupt:
-                        self.logging_muted = False
+                try:
+                    if not sys.stdin.isatty():
+                        self.get_logger().warning("[TEST] İnteraktif terminal bulunamadı (non-interactive shell). Manuel hedef koordinat girişi atlanıyor.")
                         return
-                    except Exception as e:
-                        print(f"Koordinat ayrıştırma hatası: {e}. Lütfen tekrar deneyin.")
-                self.logging_muted = False
+                    while rclpy.ok():
+                        print("\n" + "="*50)
+                        print(" MANUEL HEDEF KOORDİNAT GİRİŞİ ")
+                        print("="*50)
+                        print(f"Mevcut RTK Kalitesi: {quality_text(self.current_quality)} ({self.current_sats} uydu)")
+                        print(f"Mevcut Konum: ({lat_end:.8f}, {lon_end:.8f})")
+                        print("Lütfen enlem ve boylamı aralarında virgül olacak şekilde girin.")
+                        print("Örnek: 39.925000, 32.836000")
+                        print("="*50)
+
+                        try:
+                            user_input = input("Hedef Koordinat (lat, lon): ")
+                            if not user_input.strip():
+                                continue
+                            lat_str, lon_str = user_input.split(",")
+                            target_lat = float(lat_str.strip())
+                            target_lon = float(lon_str.strip())
+                            break
+                        except KeyboardInterrupt:
+                            return
+                        except Exception as e:
+                            print(f"Koordinat ayrıştırma hatası: {e}. Lütfen tekrar deneyin.")
+                except EOFError:
+                    self.get_logger().warning("[TEST] EOFError: Terminal girdisi alınamadı. Manuel giriş atlanıyor.")
+                    return
+                finally:
+                    self.logging_muted = False
 
             # ADIM 6: Dönüş Açısı ve Süresini Hesapla
             theta_target = bearing_between_gps_deg(lat_end, lon_end, target_lat, target_lon)
             distance = haversine(lat_end, lon_end, target_lat, target_lon)
             delta_theta = angle_error_deg(theta_target, theta_start)
 
+            _, gmaps_target = make_map_links(target_lat, target_lon)
             self.get_logger().info(f"[TEST] Hedef Koordinat: ({target_lat:.8f}, {target_lon:.8f})")
+            self.get_logger().info(f"[TEST LİNK] Hedef Google Harita: {gmaps_target}")
             self.get_logger().info(f"[TEST] Hedefe Olan Mesafe: {distance:.2f} metre")
             self.get_logger().info(f"[TEST] Hedef Açısı (Bearing): {theta_target:.2f}°")
             self.get_logger().info(f"[TEST] Gerekli Dönüş Açısı: {delta_theta:.2f}°")
@@ -621,6 +740,10 @@ class RoverRTKNode(Node):
             self.get_logger().info(f"[TEST] Hedefe doğru {distance:.2f} metre dümdüz sürülüyor ({drive_duration:.2f} saniye)...")
             self.send_velocity(v_fwd, 0.0, drive_duration)
 
+            if self.current_lat is not None and self.current_lon is not None:
+                _, gmaps_final = make_map_links(self.current_lat, self.current_lon)
+                self.get_logger().info(f"[TEST LİNK] Ulaşılan Son Konum Google Harita: {gmaps_final}")
+
             self.get_logger().info("[TEST] Hedefe ulaşıldı! Navigasyon testi başarıyla tamamlandı.")
         except Exception as e:
             self.get_logger().error(f"[TEST HATA] Test akışında beklenmedik hata: {e}")
@@ -648,14 +771,22 @@ def main(args=None) -> None:
         pass
     finally:
         node.stop_flag.set()
-        node.get_logger().info("[ROVER] Shutting down...")
+        try:
+            node.get_logger().info("[ROVER] Shutting down...")
+            stop_cmd = Twist()
+            node.cmd_pub.publish(stop_cmd)
+        except Exception:
+            pass
         
-        # Publish final safety stops
-        stop_cmd = Twist()
-        node.cmd_pub.publish(stop_cmd)
-        
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+            
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

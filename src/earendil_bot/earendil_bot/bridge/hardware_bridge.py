@@ -40,6 +40,8 @@ class HardwareBridgeNode(Node):
         self.declare_parameter('ticks_per_rev', 341.2)
         self.declare_parameter('heading_offset', 0.0)
         self.declare_parameter('ir_height', 1.0)
+        self.declare_parameter('sensor_watchdog_timeout', 2.0)
+        self.declare_parameter('motor_watchdog_timeout', 1.0)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
@@ -52,6 +54,8 @@ class HardwareBridgeNode(Node):
         self.ticks_per_rev = self.get_parameter('ticks_per_rev').value
         self.heading_offset = self.get_parameter('heading_offset').value
         self.ir_height = self.get_parameter('ir_height').value
+        self.sensor_watchdog_timeout = self.get_parameter('sensor_watchdog_timeout').value
+        self.motor_watchdog_timeout = self.get_parameter('motor_watchdog_timeout').value
 
         # ---------------------------------------------------------
         # State Variables
@@ -160,7 +164,7 @@ class HardwareBridgeNode(Node):
 
     def _keepalive(self):
         if self.last_cmd and self.last_cmd != "MOTOR:STOP":
-            if (self.get_clock().now().nanoseconds / 1e9) - self.last_cmd_time > 1.0:
+            if (self.get_clock().now().nanoseconds / 1e9) - self.last_cmd_time > self.motor_watchdog_timeout:
                 self.last_cmd = "MOTOR:STOP"
                 if self.ser:
                     self._send_raw(self.last_cmd)
@@ -172,17 +176,17 @@ class HardwareBridgeNode(Node):
         current_time = self.get_clock().now().nanoseconds / 1e9
         
         # Check Encoder
-        if self.enc_active and (current_time - self.last_enc_time > 2.0):
+        if self.enc_active and (current_time - self.last_enc_time > self.sensor_watchdog_timeout):
             self.enc_active = False
             self.get_logger().warn("Encoder data lost! Continuing with available sensors...")
             
         # Check Magnetometer
-        if self.mag_active and (current_time - self.last_mag_time > 2.0):
+        if self.mag_active and (current_time - self.last_mag_time > self.sensor_watchdog_timeout):
             self.mag_active = False
             self.get_logger().warn("Magnetometer data lost! Continuing with available sensors...")
             
         # Check IMU
-        if self.imu_active and (current_time - self.last_imu_time > 2.0):
+        if self.imu_active and (current_time - self.last_imu_time > self.sensor_watchdog_timeout):
             self.imu_active = False
             self.get_logger().warn("IMU data lost! Continuing with available sensors...")
 

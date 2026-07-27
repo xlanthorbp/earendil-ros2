@@ -1,4 +1,4 @@
-# Bu script Jetson Nano üzerinde çalışmaktadır ve bir systemd servisi (service) olarak arka planda otomatik başlatılır.
+# Bu script Jetson Nano üzerinde çalışmaktadır ve bir systemd servisi (aruco_perception.service) olarak arka planda otomatik başlatılır.
 # Raspberry Pi 5 ile ethernet kablosu üzerinden kurulan yerel ağ (LAN) bağlantısı üzerinden haberleşir.
 # Kamera görüntüsünü işleyerek ArUco tag tespitlerini yapar ve elde edilen verileri UDP soketleri aracılığıyla Raspberry Pi 5'e iletir.
 import cv2

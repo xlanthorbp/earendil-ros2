@@ -5,6 +5,9 @@ log/
 *.log
 *.json
 _dormant/
+rscp/
+earendil-h7-ros2/
+
 
 # MATLAB/Simulink
 *.asv

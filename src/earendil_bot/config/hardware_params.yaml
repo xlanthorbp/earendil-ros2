@@ -1,60 +1,77 @@
 # hardware_params.yaml
-# Hardware configurations for Earendil Bot
+# Earendil Bot Donanım ve Sensör Konfigürasyonları
 
-# Arduino Configuration
+# ---------------------------------------------------------
+# Arduino Donanım Köprüsü Düğümü (hardware_bridge)
+# ---------------------------------------------------------
 hardware_bridge:
   ros__parameters:
-    # Serial Port Settings
-    port: "/dev/ttyACMx"
-    baudrate: 115200
-    ir_height: 1.0                # meters (Height of the IR sensor from the ground)
+    # Seri Port Ayarları
+    port: "/dev/ttyACMx"          # Arduino Seri Port Aygıt Yolu (örn: /dev/ttyACM0 veya /dev/ttyUSB0)
+    baudrate: 115200              # Seri haberleşme hızı (Baud Rate)
+    ir_height: 1.0                # Kızılötesi (IR) sensörünün yerden yüksekliği [metre]
 
-    # Kinematics (For Odometry)
-    wheel_radius: 0.15            # meters (Taken from URDF: wheel_link_radius = 0.15)
-    wheel_separation: 0.7         # meters (Taken from URDF: body_link_y_dim (0.6) + wheel_link_length (0.1) = 0.7)
-    ticks_per_rev: 341.2          # Encoder ticks per 1 full wheel revolution (Adjust for your specific motor gear ratio)
-    
-    # Magnetometer (Yaw Offset)
-    heading_offset: 0.0           # degrees (Used to align magnetic north with robot's forward direction if needed)
+    # Kinematik ve Odometri Hesaplama Ayarları
+    wheel_radius: 0.15            # Tekerlek yarıçapı [metre] (URDF link değeri: 0.15m)
+    wheel_separation: 0.7         # İki tekerlek arası mesafe / iz genişliği [metre]
+    ticks_per_rev: 341.2          # Tekerleğin 1 tam turundaki Enkoder pulse/tick sayısı
 
-    # Motor PWM Limits
-    min_pwm: 60
-    max_pwm: 90
-    use_gpstest_commands: true
+    # Manyetometre Yönelim Ayarları
+    heading_offset: 0.0           # Pusula sıfırlama/sapma açısı ofseti [derece]
 
-# RTK GPS Node Configuration
+    # Motor PWM Limitleri
+    min_pwm: 60                   # Motoru hareket ettirebilecek minimum PWM eşik değeri (0-255)
+    max_pwm: 90                   # Güvenli sürüş için maksimum izin verilen PWM hızı (0-255)
+    use_gpstest_commands: true    # Arduino tarafında eski Türkçe metin komutlarını kullanma bayrağı
+
+    # Güvenlik ve Bekçi (Watchdog) Zaman Aşımları
+    sensor_watchdog_timeout: 2.0  # Sensör verisi kesilirse kayıp ilan etme süresi [saniye]
+    motor_watchdog_timeout: 1.0   # ROS komutu kesilirse motorları otomatik durdurma süresi [saniye]
+
+# ---------------------------------------------------------
+# RTK GPS Modülü Düğümü (roverRTK)
+# ---------------------------------------------------------
 roverRTK:
   ros__parameters:
-    gps_port: "/dev/ttyUSBx"
-    radio_port: "/dev/ttyUSBx"
-    gps_baud: 460800
-    radio_baud: 57600
-    configure_rover: true
-    min_pwm: 60
-    max_pwm: 90
-    target_pwm: 80
-    cmd_vel_topic: "/cmd_vel"
-    target_lat: 0.0
-    target_lon: 0.0
+    gps_port: "/dev/ttyUSB0"      # Rover LC29H GPS alıcısının bağlı olduğu USB seri port
+    radio_port: "/dev/ttyUSB1"    # USB-TTL RF Telemetri radyosunun bağlı olduğu seri port
+    gps_baud: 460800              # Rover GPS seri port baud hızı
+    radio_baud: 115200            # RF Telemetri seri port baud hızı (115200 baud)
+    configure_rover: true         # Başlangıçta Rover GPS modülünü otomatik konfigüre et
+    min_pwm: 60                   # Otonom sürüş minimum PWM sınırı
+    max_pwm: 90                   # Otonom sürüş maksimum PWM sınırı
+    target_pwm: 80                # Hedef otonom seyir PWM hızı
+    cmd_vel_topic: "/cmd_vel"     # Motor hareket komutlarının yayınlanacağı topic
+    target_lat: 0.0               # Başlangıç hedef GPS enlemi
+    target_lon: 0.0               # Başlangıç hedef GPS boylamı
+    enable_test_flow: false       # Otonom sürüş test akışını çalıştırma bayrağı (varsayılan kapalı)
+    map_link_print_interval: 3.0  # Harita linklerinin terminale yazdırılma sıklığı (saniye)
+    map_link_topic: "/gps/map_link" # Google Harita linkinin yayınlanacağı ROS konusu (topic)
 
-# 2D Lidar Node Configuration
+# ---------------------------------------------------------
+# 2D Lidar Düğümü (STL27L)
+# ---------------------------------------------------------
 STL27L:
   ros__parameters:
-    port_name: "/dev/ttyUSBx"
-    port_baudrate: 921600
+    port_name: "/dev/ttyUSBx"     # Lidar sensörünün bağlı olduğu seri port aygıtı
+    port_baudrate: 921600         # Lidar veri aktarım baud hızı
 
-# Aruco Ethernet Receiver Configuration
+# ---------------------------------------------------------
+# ArUco Etiket Alıcısı - Ethernet / Jetson (aruco_receiver)
+# ---------------------------------------------------------
 aruco_receiver:
   ros__parameters:
-    jetson_ip: "192.168.1.101"
-    port_recv: 5005
-    port_send: 5006
-    timeout: 1.5
+    jetson_ip: "192.168.1.101"    # Görüntü işleyen Jetson kartının IP adresi
+    port_recv: 5005               # ArUco tespit verisinin alınacağı UDP portu
+    port_send: 5006               # Jetson'a komut/tetik gönderilecek UDP portu
+    timeout: 1.5                  # Paket gelmezse bağlantı kopuk ilan etme süresi [saniye]
 
-# Rock Ethernet Receiver Configuration
+# ---------------------------------------------------------
+# Taş Tespit Alıcısı - Ethernet / Jetson (rock_receiver)
+# ---------------------------------------------------------
 rock_receiver:
   ros__parameters:
-    jetson_ip: "192.168.1.101"
-    port_recv: 5007
-    port_send: 5008
-    timeout: 1.5
+    jetson_ip: "192.168.1.101"    # Taş tespiti yapan Jetson kartının IP adresi
+    port_recv: 5007               # Taş verilerinin alınacağı UDP portu
+    port_send: 5008               # Jetson'a yanıt/tetik gönderilecek UDP portu
+    timeout: 1.5                  # Taş verisi gelmezse zaman aşımı süresi [saniye]
