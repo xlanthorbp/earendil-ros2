@@ -9,49 +9,18 @@ def generate_launch_description():
     # Earendil bot package path
     earendil_share_dir = get_package_share_directory('earendil_bot')
     
-    # Lidar package path
-    ldlidar_share_dir = get_package_share_directory('ldlidar_stl_ros2')
-
-    # Parameters
+    # Hardware parameters path
     hardware_params = os.path.join(earendil_share_dir, 'config', 'hardware_params.yaml')
 
     return LaunchDescription([
-        # 1. Start Lidar (Directly defined so it can read hardware_params.yaml)
-        Node(
-            package='ldlidar_stl_ros2',
-            executable='ldlidar_stl_ros2_node',
-            name='STL27L',
-            output='screen',
-            parameters=[
-                hardware_params,
-                {'product_name': 'LDLiDAR_STL27L'},
-                {'topic_name': 'scan'},
-                {'frame_id': 'base_laser'},
-                {'laser_scan_dir': True},
-                {'enable_angle_crop_func': False},
-                {'angle_crop_min': 0.0},
-                {'angle_crop_max': 0.0}
-            ]
-        ),
-        
-        # Base link to laser transform
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_link_to_base_laser_stl27l',
-            arguments=['0','0','0.18','0','0','0','base_link','base_laser']
-        ),
-        
-        # (IR Bridge has been merged into hardware_bridge)
-        
-        # 3. Motor Control and H7 Sensors
+        # 1. Start Base Hardware (LiDAR, Static TF, Hardware Bridge)
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(get_package_share_directory('earendil_h7_bridge'), 'launch', 'h7_sensors.launch.py')
+                os.path.join(earendil_share_dir, 'launch', 'h7_hardware.launch.py')
             )
         ),
 
-        # 5. Aruco Ethernet Receiver Node
+        # 2. Start ArUco Ethernet Receiver Node
         Node(
             package='earendil_bot',
             executable='aruco_receiver',

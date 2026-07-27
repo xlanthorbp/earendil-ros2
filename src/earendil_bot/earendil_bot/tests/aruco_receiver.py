@@ -8,7 +8,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Point
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Int32
 import socket
 import json
 import threading
@@ -25,6 +25,8 @@ class ArucoReceiverNode(Node):
         self.declare_parameter('timeout', 1.5)                 # Network timeout in seconds
         self.declare_parameter('detection_confidence_frames', 3)
         self.declare_parameter('max_valid_detection_dist', 8.0)
+        self.declare_parameter('initial_stage', 1)
+        self.declare_parameter('active_stages', [1, 3, 4])     # Enabled in stages 1, 3, 4 (disabled in Stage 2)
 
         self.jetson_ip = self.get_parameter('jetson_ip').value
         self.port_recv = self.get_parameter('port_recv').value
@@ -32,14 +34,23 @@ class ArucoReceiverNode(Node):
         self.timeout = self.get_parameter('timeout').value
         self.detection_confidence_frames = int(self.get_parameter('detection_confidence_frames').value)
         self.max_valid_detection_dist = float(self.get_parameter('max_valid_detection_dist').value)
+        self.initial_stage = int(self.get_parameter('initial_stage').value)
         
-        # Publishers
+        active_stages_param = self.get_parameter('active_stages').value
+        self.active_stages = [int(s) for s in active_stages_param] if isinstance(active_stages_param, list) else [1, 3, 4]
+        
+        # State variables
+        self.current_stage = self.initial_stage
+        self.is_enabled = (self.current_stage in self.active_stages)
+        self.last_packet_time = 0.0
+        self.is_running = True
+        
+        # Publishers & Subscriptions
         self.midpoint_pub = self.create_publisher(Point, '/aruco_midpoint', 10)
         self.visible_pub = self.create_publisher(Bool, '/aruco_visible', 10)
         
-        # State variables
-        self.last_packet_time = 0.0
-        self.is_running = True
+        self.stage_sub = self.create_subscription(Int32, '/rscp/command/set_stage', self._stage_cb, 10)
+        self.enable_sub = self.create_subscription(Bool, '/aruco_receiver/enable', self._enable_cb, 10)
         
         # Socket setup for sending commands (heartbeats)
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -57,12 +68,40 @@ class ArucoReceiverNode(Node):
         # ROS 2 shutdown hook: send STOP command to Jetson for clean exit
         rclpy.get_default_context().on_shutdown(self.stop_jetson_perception)
         
-        self.get_logger().info(f"Aruco Receiver started. Listening on UDP port {self.port_recv}.")
-        self.get_logger().info(f"Sending START commands to Jetson at {self.jetson_ip}:{self.port_send}")
+        self.get_logger().info(
+            f"Aruco Receiver initialized (Initial Stage: {self.initial_stage}, Active Stages: {self.active_stages}, Enabled: {self.is_enabled}). "
+            f"Listening UDP port {self.port_recv}."
+        )
+
+    def _stage_cb(self, msg: Int32):
+        new_stage = msg.data
+        self.current_stage = new_stage
+        self.get_logger().info(f"Aruco Receiver stage update received: STAGE {new_stage}")
+        
+        if new_stage in self.active_stages:
+            if not self.is_enabled:
+                self.get_logger().info(f"🟢 STAGE {new_stage} active for ArUco! Enabling ArUco receiver -> sending START to Jetson.")
+                self.is_enabled = True
+        else:
+            if self.is_enabled:
+                self.get_logger().info(f"⚪ STAGE {new_stage} (Krater rock mission) active. Disabling ArUco receiver -> sending STOP to Jetson.")
+                self.is_enabled = False
+                self.stop_jetson_perception()
+                self._publish_inactive()
+
+    def _enable_cb(self, msg: Bool):
+        if msg.data and not self.is_enabled:
+            self.get_logger().info("🟢 ArUco receiver manually enabled.")
+            self.is_enabled = True
+        elif not msg.data and self.is_enabled:
+            self.get_logger().info("⚪ ArUco receiver manually disabled.")
+            self.is_enabled = False
+            self.stop_jetson_perception()
+            self._publish_inactive()
 
     def _send_heartbeat(self):
         """Sends START command to Jetson to keep perception session active."""
-        if not self.is_running:
+        if not self.is_running or not self.is_enabled:
             return
         try:
             self.sock_send.sendto(b"START", (self.jetson_ip, self.port_send))
@@ -71,8 +110,7 @@ class ArucoReceiverNode(Node):
 
     def stop_jetson_perception(self):
         """Sends a STOP command to Jetson to shut down its camera pipeline gracefully."""
-        self.get_logger().info("Shutting down Aruco Receiver. Sending STOP command to Jetson...")
-        self.is_running = False
+        self.get_logger().info("Sending STOP command to Jetson for ArUco perception...")
         try:
             # Send STOP command multiple times to ensure receipt over UDP
             for _ in range(3):
@@ -80,8 +118,17 @@ class ArucoReceiverNode(Node):
                 time.sleep(0.05)
         except Exception as e:
             self.get_logger().error(f"Failed to send STOP command: {e}")
-        finally:
-            self.sock_send.close()
+
+    def _publish_inactive(self):
+        visible_msg = Bool()
+        visible_msg.data = False
+        self.visible_pub.publish(visible_msg)
+        
+        midpoint_msg = Point()
+        midpoint_msg.x = 0.0
+        midpoint_msg.y = 0.0
+        midpoint_msg.z = 0.0
+        self.midpoint_pub.publish(midpoint_msg)
 
     def _socket_listener(self):
         """Background thread listening to UDP port for detection data from Jetson."""
@@ -97,6 +144,9 @@ class ArucoReceiverNode(Node):
         while self.is_running and rclpy.ok():
             try:
                 data, addr = sock_recv.recvfrom(1024)
+                if not self.is_enabled:
+                    continue
+
                 message = data.decode('utf-8')
                 parsed_data = json.loads(message)
                 
@@ -144,6 +194,8 @@ class ArucoReceiverNode(Node):
 
     def _check_timeout(self):
         """Watchdog to verify connection stability. Publishes visible=False if Jetson goes quiet."""
+        if not self.is_enabled:
+            return
         if self.last_packet_time > 0:
             elapsed = time.time() - self.last_packet_time
             if elapsed > self.timeout:
@@ -152,21 +204,16 @@ class ArucoReceiverNode(Node):
                     throttle_duration_sec=3.0
                 )
                 
-                visible_msg = Bool()
-                visible_msg.data = False
-                self.visible_pub.publish(visible_msg)
-                
-                midpoint_msg = Point()
-                midpoint_msg.x = 0.0
-                midpoint_msg.y = 0.0
-                midpoint_msg.z = 0.0
-                self.midpoint_pub.publish(midpoint_msg)
-                
+                self._publish_inactive()
                 # Reset packet timer to avoid duplicate warning logs
                 self.last_packet_time = 0.0
 
     def destroy_node(self):
         self.is_running = False
+        try:
+            self.sock_send.close()
+        except Exception:
+            pass
         if self.recv_thread.is_alive():
             self.recv_thread.join(timeout=1.0)
         super().destroy_node()
@@ -176,11 +223,12 @@ def main(args=None):
     node = ArucoReceiverNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            node.destroy_node()
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

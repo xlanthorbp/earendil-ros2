@@ -90,6 +90,8 @@ aruco_receiver:
     timeout: 1.5                  # Paket gelmezse bağlantı kopuk ilan etme süresi [saniye]
     detection_confidence_frames: 3 # Doğrulama için min ardışık tespit karesi
     max_valid_detection_dist: 8.0 # Maksimum geçerli algılama mesafesi [metre]
+    initial_stage: 1              # Başlangıç görevi/aşaması
+    active_stages: [1, 3, 4]      # ArUco tespiti aktif olduğu aşamalar (Stage 2 Krater hariç)
 
 # ---------------------------------------------------------
 # Taş Tespit Alıcısı - Ethernet / Jetson (rock_receiver)
@@ -102,3 +104,6 @@ rock_receiver:
     timeout: 1.5                  # Taş verisi gelmezse zaman aşımı süresi [saniye]
     detection_confidence_frames: 3 # Doğrulama için min ardışık tespit karesi
     max_valid_detection_dist: 8.0 # Maksimum geçerli algılama mesafesi [metre]
+    initial_stage: 1              # Başlangıç görevi/aşaması (Stage 2 öncesi beklemede)
+    active_stage: 2               # Taş tespitinin aktif çalıştığı aşama (Stage 2: Krater)
+    auto_shutdown_after_stage: true # Stage > 2 (Tünel vs.) olduğunda nodu otomatik shutdown et

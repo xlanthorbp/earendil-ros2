@@ -1,18 +1,14 @@
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     earendil_share_dir = get_package_share_directory('earendil_bot')
-    h7_bridge_share_dir = get_package_share_directory('earendil_h7_bridge')
-    
     hardware_params = os.path.join(earendil_share_dir, 'config', 'hardware_params.yaml')
 
     return LaunchDescription([
-        # 1. Start Lidar
+        # 1. Start LiDAR (STL27L)
         Node(
             package='ldlidar_stl_ros2',
             executable='ldlidar_stl_ros2_node',
@@ -30,26 +26,19 @@ def generate_launch_description():
             ]
         ),
         
-        # Base link to laser transform
+        # 2. Base link to laser static transform publisher
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_base_laser_stl27l',
-            arguments=['0','0','0.18','0','0','0','base_link','base_laser']
+            arguments=['0', '0', '0.18', '0', '0', '0', 'base_link', 'base_laser']
         ),
         
-        # 3. H7 Sensors and Bridge
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(h7_bridge_share_dir, 'launch', 'h7_sensors.launch.py')
-            )
-        ),
-
-        # 4. Aruco Ethernet Receiver Node
+        # 3. Hardware Bridge Node (Encoders, IMU, Magnetometer, IR, Motor Driver)
         Node(
             package='earendil_bot',
-            executable='aruco_receiver',
-            name='aruco_receiver',
+            executable='hardware_bridge',
+            name='hardware_bridge',
             output='screen',
             parameters=[hardware_params]
         )
