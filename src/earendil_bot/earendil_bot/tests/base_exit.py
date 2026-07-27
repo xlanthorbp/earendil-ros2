@@ -9,7 +9,7 @@ import sys
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String, Float64
+from std_msgs.msg import String, Float32, Float64
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener, TransformException
 
@@ -36,6 +36,7 @@ class BaseExitNode(Node):
         self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.heading_sub = self.create_subscription(Float64, '/earendil/heading/deg', self.heading_callback, 10)
+        self.mag_heading_sub = self.create_subscription(Float32, '/mag/heading', self.mag_heading_callback, 10)
         
         # TF (To get X and Y position based on map/odom)
         self.tf_buffer = Buffer()
@@ -45,9 +46,14 @@ class BaseExitNode(Node):
         
     def heading_callback(self, msg: Float64):
         # Heading from QMC5883L in degrees -> convert to radians [-pi, pi]
-        deg = msg.data
+        deg = float(msg.data)
         self.current_yaw = math.radians(deg)
         # Normalize to [-pi, pi]
+        self.current_yaw = math.atan2(math.sin(self.current_yaw), math.cos(self.current_yaw))
+
+    def mag_heading_callback(self, msg: Float32):
+        deg = float(msg.data)
+        self.current_yaw = math.radians(deg)
         self.current_yaw = math.atan2(math.sin(self.current_yaw), math.cos(self.current_yaw))
         
     def scan_callback(self, msg: LaserScan):

@@ -8,7 +8,8 @@ import time
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import Float64, String
+from std_msgs.msg import Float32, Float64, String
+from geometry_msgs.msg import Twist
 from earendil_bot.gps.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
 
 
@@ -97,10 +98,12 @@ class PeakFinderNode(Node):
 
         # Publishers & Subscribers
         self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.peak_pub = self.create_publisher(NavSatFix, '/gps/peak_coordinate', 10)
 
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
-        self.create_subscription(Float64, '/earendil/heading/deg', self.mag_cb, 10)
+        self.create_subscription(Float32, '/mag/heading', self.mag_cb, 10)
+        self.create_subscription(NavSatFix, '/gps/search_center', self.search_center_cb, 10)
 
         # Control Loop 10 Hz
         self.timer = self.create_timer(0.1, self.control_loop)
@@ -108,6 +111,16 @@ class PeakFinderNode(Node):
         self.get_logger().info('Peak Finder Node Started.')
         self.get_logger().info(f'Target Center: ({self.target_lat:.6f}, {self.target_lon:.6f}) | Radius: {self.search_radius}m')
         self.get_logger().info('State: DRIVING_TO_CENTER')
+
+    def search_center_cb(self, msg: NavSatFix):
+        self.target_lat = msg.latitude
+        self.target_lon = msg.longitude
+        self.state = 'DRIVING_TO_CENTER'
+        self.aligned = False
+        self.altitude_records.clear()
+        self.get_logger().info(
+            f"📍 New Search Center Received from Mission Manager: ({self.target_lat:.6f}, {self.target_lon:.6f}). Starting Stage 1 search!"
+        )
 
     def gps_cb(self, msg: NavSatFix):
         self.current_lat = msg.latitude
@@ -120,15 +133,20 @@ class PeakFinderNode(Node):
             if msg.status.status >= 0 and self.current_alt is not None:
                 self.altitude_records.append((self.current_lat, self.current_lon, self.current_alt))
 
-    def mag_cb(self, msg: Float64):
-        # /earendil/heading/deg is in degrees (0-360)
-        self.mag_heading = math.radians(msg.data)
+    def mag_cb(self, msg: Float32):
+        # /mag/heading is in degrees (0-360)
+        self.mag_heading = math.radians(float(msg.data))
         self.last_mag_time = time.time()
 
     def send_motor_cmd(self, v, w):
         if self.dry_run:
             v = 0.0
             w = 0.0
+
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
 
         msg = String()
         if abs(w) > 0.1:

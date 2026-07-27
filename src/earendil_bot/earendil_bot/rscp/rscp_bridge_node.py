@@ -6,7 +6,7 @@
 import math
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Empty, Bool, Int32, Float64
+from std_msgs.msg import Empty, Bool, Int32, Float32, Float64
 from sensor_msgs.msg import NavSatFix
 
 from earendil_bot.rscp.rscp_serial_handler import RSCPSerialHandler
@@ -61,6 +61,7 @@ class RSCPBridgeNode(Node):
         self.is_armed = False
 
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
+        self.create_subscription(Float32, '/mag/heading', self.mag_heading_cb, 10)
         self.create_subscription(Float64, '/earendil/heading/deg', self.heading_cb, 10)
         self.create_subscription(Bool, '/rscp/command/arm', self.arm_state_cb, 10)
 
@@ -79,6 +80,9 @@ class RSCPBridgeNode(Node):
             self.create_timer(period, self.publish_status_telemetry)
 
         self.get_logger().info(f"RSCP Bridge Node active on {self.port}.")
+
+    def mag_heading_cb(self, msg: Float32):
+        self.current_heading = float(msg.data)
 
     def arm_state_cb(self, msg: Bool):
         self.is_armed = msg.data

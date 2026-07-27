@@ -35,6 +35,7 @@ setup(
             'base_enter = earendil_bot.tests.base_enter:main',
             'hardware_check = earendil_bot.hardware_check:main',
             'roverRTK = earendil_bot.gps.roverRTK:main',
+            'gps_navigator_node = earendil_bot.gps.gps_navigator_node:main',
             'tunnel_test1 = earendil_bot.tests.tunnel_test1:main',
             'tunnel_test2 = earendil_bot.tests.tunnel_test2:main',
             'tunnel_test3 = earendil_bot.tests.tunnel_test3:main',

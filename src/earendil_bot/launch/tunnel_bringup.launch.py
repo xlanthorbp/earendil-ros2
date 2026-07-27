@@ -27,8 +27,8 @@ def generate_launch_description():
         # 3. Start Tunnel Navigation Node (With parameters)
         Node(
             package='earendil_bot',
-            executable='tunnel_navigator',
-            name='tunnel_navigator',
+            executable='tunnel_test5',
+            name='tunnel_test5',
             output='screen',
             parameters=[tunnel_params_path]
         )

@@ -5,9 +5,9 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan, Range
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Twist
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float64
+from std_msgs.msg import Float32, Float64, String, Bool, Empty
 import math
 
 class DummyTwist:
@@ -24,9 +24,16 @@ class Test5Node(Node):
         super().__init__('test5')
         
         self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.rscp_distance_pub = self.create_publisher(Float64, '/rscp/feedback/distance', 10)
+        self.rscp_task_finished_pub = self.create_publisher(Empty, '/rscp/feedback/task_finished', 10)
+
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.ir_sub = self.create_subscription(Range, '/ir_top', self.ir_callback, 10)
-        self.heading_sub = self.create_subscription(Float64, '/earendil/heading/deg', self.heading_callback, 10)
+        self.heading_sub = self.create_subscription(Float32, '/mag/heading', self.heading_callback, 10)
+        self.tunnel_start_sub = self.create_subscription(Empty, '/tunnel/start', self.tunnel_start_cb, 10)
+
+        self.rscp_feedback_sent = False
         
         self.aruco_midpoint_sub = self.create_subscription(Point, '/aruco_midpoint', self.aruco_midpoint_callback, 10)
         self.aruco_visible_sub = self.create_subscription(Bool, '/aruco_visible', self.aruco_visible_callback, 10)
@@ -125,6 +132,11 @@ class Test5Node(Node):
         self.get_logger().info('Test5 Node Started (Entrance and Exit ArUco Enabled).')
         self.get_logger().info('State: SEARCHING_ENTRANCE (Turning right, looking for 2 ArUcos)')
 
+    def tunnel_start_cb(self, msg: Empty):
+        self.get_logger().info("🚀 Tunnel exploration start trigger received from mission_manager_node!")
+        if self.state in ['SEARCHING_ENTRANCE', 'BACKING_UP_FOR_SEARCH']:
+            self.accumulated_yaw = 0.0
+
     def aruco_visible_callback(self, msg):
         self.aruco_visible = msg.data
 
@@ -182,6 +194,11 @@ class Test5Node(Node):
         self.send_motor_cmd(0.0, 0.0)
 
     def send_motor_cmd(self, v, w):
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
+
         msg = String()
         if abs(w) > 0.05:
             pwm = 60 + int((abs(w) / 0.5) * 30)
@@ -537,6 +554,15 @@ class Test5Node(Node):
         elif self.state == 'COMPLETED':
             twist.linear.x = 0.0
             twist.angular.z = 0.0
+            if not self.rscp_feedback_sent:
+                self.rscp_feedback_sent = True
+                dist_msg = Float64()
+                dist_msg.data = float(self.tunnel_length)
+                self.rscp_distance_pub.publish(dist_msg)
+                self.rscp_task_finished_pub.publish(Empty())
+                self.get_logger().info(
+                    f"🏁 RSCP Stage 3 Completed! Published Distance ({self.tunnel_length:.2f}m) and TaskFinished."
+                )
             
         if self.tunnel_timer_completed:
             display_len = self.tunnel_length

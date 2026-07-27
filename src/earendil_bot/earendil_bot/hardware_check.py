@@ -31,10 +31,11 @@ class HardwareCheckerNode(Node):
         
         # Added new hardware (IMU, Mag, GPS)
         from sensor_msgs.msg import Imu, NavSatFix
-        from std_msgs.msg import Float64
+        from std_msgs.msg import Float32, Float64
         
         self.create_subscription(Imu, '/earendil/imu/data_raw', self.imu_cb, 10)
         self.create_subscription(Float64, '/earendil/heading/deg', self.mag_cb, 10)
+        self.create_subscription(Float32, '/mag/heading', self.mag_cb, 10)
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
 
         # 1-second timer to print status to the screen

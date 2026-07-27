@@ -10,7 +10,8 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String, Float64
+from std_msgs.msg import String, Float32, Float64, Empty
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener, TransformException
 
@@ -30,6 +31,7 @@ class BaseEnterNode(Node):
         self.declare_parameter('lidar_stop_above', True)       # True: stop when > threshold, False: stop when < threshold
         self.declare_parameter('lidar_stop_ratio', 0.8)       # Ratio of ranges meeting the condition
         self.declare_parameter('min_enter_duration', 2.0)     # Avoid immediate stop when starting
+        self.declare_parameter('wait_for_trigger', True)       # Wait for /base_enter/start trigger
 
         self.forward_speed = self.get_parameter('forward_speed').value
         self.turn_speed = self.get_parameter('turn_speed').value
@@ -39,11 +41,13 @@ class BaseEnterNode(Node):
         self.lidar_stop_above = self.get_parameter('lidar_stop_above').value
         self.lidar_stop_ratio = self.get_parameter('lidar_stop_ratio').value
         self.min_enter_duration = self.get_parameter('min_enter_duration').value
+        self.wait_for_trigger = self.get_parameter('wait_for_trigger').value
 
         # ---------------------------------------------------------
         # State Variables
         # ---------------------------------------------------------
-        self.state = 'NAVIGATING'  # NAVIGATING -> ALIGNING -> ENTERING -> DONE
+        # WAITING_FOR_TRIGGER -> NAVIGATING -> ALIGNING -> ENTERING -> DONE
+        self.state = 'WAITING_FOR_TRIGGER' if self.wait_for_trigger else 'NAVIGATING'
         self.current_yaw = 0.0
         self.current_x = 0.0
         self.current_y = 0.0
@@ -59,8 +63,10 @@ class BaseEnterNode(Node):
         # Publishers and Subscribers
         # ---------------------------------------------------------
         self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.heading_sub = self.create_subscription(Float64, '/earendil/heading/deg', self.heading_callback, 10)
+        self.heading_sub = self.create_subscription(Float32, '/mag/heading', self.heading_callback, 10)
+        self.start_sub = self.create_subscription(Empty, '/base_enter/start', self.start_cb, 10)
 
         # TF Buffer and Listener
         self.tf_buffer = Buffer()
@@ -72,7 +78,12 @@ class BaseEnterNode(Node):
         # Shutdown safety hook
         rclpy.get_default_context().on_shutdown(self.stop_robot_completely)
 
-        self.get_logger().info('Base Enter Node Started. Navigating to base position...')
+        self.get_logger().info(f'Base Enter Node Started. Initial State: {self.state}')
+
+    def start_cb(self, msg: Empty):
+        self.get_logger().info("🚀 Base enter trigger received from mission_manager_node!")
+        if self.state == 'WAITING_FOR_TRIGGER':
+            self.state = 'NAVIGATING'
 
     def _load_base_position(self):
         save_path = os.path.expanduser('~/.ros/base_position.json')
@@ -102,9 +113,9 @@ class BaseEnterNode(Node):
             self.get_logger().error(f"❌ Failed to load base position from file: {e}")
             raise SystemExit
 
-    def heading_callback(self, msg: Float64):
+    def heading_callback(self, msg: Float32):
         # Heading from QMC5883L in degrees -> convert to radians [-pi, pi]
-        deg = msg.data
+        deg = float(msg.data)
         self.current_yaw = math.radians(deg)
         self.current_yaw = math.atan2(math.sin(self.current_yaw), math.cos(self.current_yaw))
 
@@ -117,6 +128,11 @@ class BaseEnterNode(Node):
         return diff
 
     def send_motor_cmd(self, v, w):
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
+
         msg = String()
         if v == 0.0 and w == 0.0:
             msg.data = "stop"
@@ -131,7 +147,7 @@ class BaseEnterNode(Node):
         self.cmd_pub.publish(msg)
 
     def control_loop(self):
-        if self.state == 'DONE':
+        if self.state in ('DONE', 'WAITING_FOR_TRIGGER'):
             return
 
         # Try to lookup current position from TF
