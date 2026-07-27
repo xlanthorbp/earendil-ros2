@@ -10,7 +10,6 @@ from collections import Counter
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
-from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
 from earendil_bot.gps.gps_math import bearing_between_gps_deg, haversine, angle_error_deg
@@ -269,7 +268,7 @@ class RoverRTKNode(Node):
         self.declare_parameter('min_pwm', 60)
         self.declare_parameter('max_pwm', 90)
         self.declare_parameter('target_pwm', 80)
-        self.declare_parameter('cmd_vel_topic', '/cmd_vel')
+        self.declare_parameter('cmd_vel_topic', '/earendil/control/command')
         self.declare_parameter('target_lat', 0.0)
         self.declare_parameter('target_lon', 0.0)
         self.declare_parameter('enable_test_flow', False)
@@ -317,7 +316,7 @@ class RoverRTKNode(Node):
         # ROS Publishers
         self.gps_pub = self.create_publisher(NavSatFix, '/gps/fix', 10)
         self.map_link_pub = self.create_publisher(String, self.map_link_topic, 10)
-        self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+        self.cmd_pub = self.create_publisher(String, self.cmd_vel_topic, 10)
 
         # Timer to ALWAYS publish and print Google Maps link every 3 seconds
         self.create_timer(self.map_link_print_interval, self.publish_map_link_timer_cb)
@@ -561,19 +560,29 @@ class RoverRTKNode(Node):
         return max(0.0, min(1.0, vel))
 
     def send_velocity(self, linear_x, angular_z, duration_sec):
-        cmd = Twist()
-        cmd.linear.x = float(linear_x)
-        cmd.angular.z = float(angular_z)
+        v = float(linear_x)
+        w = float(angular_z)
+        
+        msg = String()
+        if abs(w) > 0.05:
+            pwm = int(self.min_pwm + (abs(w) * (self.max_pwm - self.min_pwm)))
+            msg.data = f"l {pwm}" if w > 0 else f"r {pwm}"
+        elif abs(v) > 0.05:
+            pwm = int(self.min_pwm + (abs(v) * (self.max_pwm - self.min_pwm)))
+            msg.data = f"f {pwm}" if v > 0 else f"b {pwm}"
+        else:
+            msg.data = "stop"
 
         start_time = time.time()
         while rclpy.ok() and (time.time() - start_time < duration_sec):
-            self.cmd_pub.publish(cmd)
+            self.cmd_pub.publish(msg)
             time.sleep(0.1)
 
-        stop_cmd = Twist()
-        self.cmd_pub.publish(stop_cmd)
+        stop_msg = String()
+        stop_msg.data = "stop"
+        self.cmd_pub.publish(stop_msg)
         time.sleep(0.1)
-        self.cmd_pub.publish(stop_cmd)
+        self.cmd_pub.publish(stop_msg)
 
     def run_test_flow(self):
         try:
@@ -773,7 +782,8 @@ def main(args=None) -> None:
         node.stop_flag.set()
         try:
             node.get_logger().info("[ROVER] Shutting down...")
-            stop_cmd = Twist()
+            stop_cmd = String()
+            stop_cmd.data = "stop"
             node.cmd_pub.publish(stop_cmd)
         except Exception:
             pass

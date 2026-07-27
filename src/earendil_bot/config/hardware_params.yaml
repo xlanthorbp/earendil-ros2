@@ -2,6 +2,29 @@
 # Earendil Bot Donanım ve Sensör Konfigürasyonları
 
 # ---------------------------------------------------------
+# RSCP Hakem Seri Haberleşme Köprü Düğümü (rscp_bridge_node)
+# ---------------------------------------------------------
+rscp_bridge_node:
+  ros__parameters:
+    port: "/dev/ttyUSBx"          # Hakem RSC-CM modülünün bağlı olduğu seri port (düz ttyUSB/ttyACM: /dev/ttyUSB2)
+    baudrate: 115200              # RSCP RS-232 baud hızı
+    status_rate_hz: 1.0           # Periyodik durum telemetrisi yayını (maks 1.0 Hz)
+    battery_default_voltage: 12.6 # Telemetri varsayılan batarya voltajı [Volt]
+    battery_default_current: 1.5  # Telemetri varsayılan batarya akımı [Amper]
+    battery_default_soc: 0.9      # Telemetri varsayılan batarya şarj yüzdesi (0.0 - 1.0)
+    ack_delay_s: 0.05             # Hakeme ACK yanıt iletim öncesi emniyet beklemesi [saniye]
+
+# ---------------------------------------------------------
+# Ana Görev Yöneticisi Düğümü (mission_manager_node)
+# ---------------------------------------------------------
+mission_manager_node:
+  ros__parameters:
+    default_search_radius: 5.0    # Zirve / Bazalt arama varsayılan yarıçapı [metre]
+    basalt_rock_arrival_distance: 0.5 # Bazalt kayaya varış kabul mesafesi [0.5 metre]
+    auto_stop_on_disarm: true     # DISARM sinyalinde motorları otomatik durdurma
+    task_finished_delay_s: 0.5    # TaskFinished bildirimi öncesi emniyet beklemesi [saniye]
+
+# ---------------------------------------------------------
 # Arduino Donanım Köprüsü Düğümü (hardware_bridge)
 # ---------------------------------------------------------
 hardware_bridge:
@@ -33,8 +56,8 @@ hardware_bridge:
 # ---------------------------------------------------------
 roverRTK:
   ros__parameters:
-    gps_port: "/dev/ttyUSB0"      # Rover LC29H GPS alıcısının bağlı olduğu USB seri port
-    radio_port: "/dev/ttyUSB1"    # USB-TTL RF Telemetri radyosunun bağlı olduğu seri port
+    gps_port: "/dev/ttyUSBx"      # Rover LC29H GPS alıcısının bağlı olduğu USB seri port
+    radio_port: "/dev/ttyUSBx"    # USB-TTL RF Telemetri radyosunun bağlı olduğu seri port
     gps_baud: 460800              # Rover GPS seri port baud hızı
     radio_baud: 115200            # RF Telemetri seri port baud hızı (115200 baud)
     configure_rover: true         # Başlangıçta Rover GPS modülünü otomatik konfigüre et
@@ -65,6 +88,8 @@ aruco_receiver:
     port_recv: 5005               # ArUco tespit verisinin alınacağı UDP portu
     port_send: 5006               # Jetson'a komut/tetik gönderilecek UDP portu
     timeout: 1.5                  # Paket gelmezse bağlantı kopuk ilan etme süresi [saniye]
+    detection_confidence_frames: 3 # Doğrulama için min ardışık tespit karesi
+    max_valid_detection_dist: 8.0 # Maksimum geçerli algılama mesafesi [metre]
 
 # ---------------------------------------------------------
 # Taş Tespit Alıcısı - Ethernet / Jetson (rock_receiver)
@@ -75,3 +100,5 @@ rock_receiver:
     port_recv: 5007               # Taş verilerinin alınacağı UDP portu
     port_send: 5008               # Jetson'a yanıt/tetik gönderilecek UDP portu
     timeout: 1.5                  # Taş verisi gelmezse zaman aşımı süresi [saniye]
+    detection_confidence_frames: 3 # Doğrulama için min ardışık tespit karesi
+    max_valid_detection_dist: 8.0 # Maksimum geçerli algılama mesafesi [metre]

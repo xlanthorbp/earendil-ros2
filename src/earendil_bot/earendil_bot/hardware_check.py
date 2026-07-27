@@ -18,8 +18,8 @@ class HardwareCheckerNode(Node):
             'Infrared (/ir_top)': 0.0,
             'Motor/Encoder (/odom)': 0.0,
             'Camera (/aruco_visible)': 0.0,
-            'IMU (/imu/data)': 0.0,
-            'Magnetometer (/mag/heading)': 0.0,
+            'IMU (/earendil/imu/data_raw)': 0.0,
+            'Heading (/earendil/heading/deg)': 0.0,
             'GPS (/gps/fix)': 0.0
         }
 
@@ -31,10 +31,10 @@ class HardwareCheckerNode(Node):
         
         # Added new hardware (IMU, Mag, GPS)
         from sensor_msgs.msg import Imu, NavSatFix
-        from std_msgs.msg import Float32
+        from std_msgs.msg import Float64
         
-        self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
-        self.create_subscription(Float32, '/mag/heading', self.mag_cb, 10)
+        self.create_subscription(Imu, '/earendil/imu/data_raw', self.imu_cb, 10)
+        self.create_subscription(Float64, '/earendil/heading/deg', self.mag_cb, 10)
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
 
         # 1-second timer to print status to the screen
@@ -54,10 +54,10 @@ class HardwareCheckerNode(Node):
         self.last_msg_times['Camera (/aruco_visible)'] = self.get_clock().now().nanoseconds / 1e9
         
     def imu_cb(self, msg):
-        self.last_msg_times['IMU (/imu/data)'] = self.get_clock().now().nanoseconds / 1e9
+        self.last_msg_times['IMU (/earendil/imu/data_raw)'] = self.get_clock().now().nanoseconds / 1e9
         
     def mag_cb(self, msg):
-        self.last_msg_times['Magnetometer (/mag/heading)'] = self.get_clock().now().nanoseconds / 1e9
+        self.last_msg_times['Heading (/earendil/heading/deg)'] = self.get_clock().now().nanoseconds / 1e9
         
     def gps_cb(self, msg):
         self.last_msg_times['GPS (/gps/fix)'] = self.get_clock().now().nanoseconds / 1e9

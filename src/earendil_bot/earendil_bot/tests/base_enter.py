@@ -10,8 +10,8 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
-from sensor_msgs.msg import LaserScan, Imu
+from std_msgs.msg import String, Float64
+from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener, TransformException
 
 
@@ -58,9 +58,9 @@ class BaseEnterNode(Node):
         # ---------------------------------------------------------
         # Publishers and Subscribers
         # ---------------------------------------------------------
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.imu_sub = self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
+        self.heading_sub = self.create_subscription(Float64, '/earendil/heading/deg', self.heading_callback, 10)
 
         # TF Buffer and Listener
         self.tf_buffer = Buffer()
@@ -102,12 +102,11 @@ class BaseEnterNode(Node):
             self.get_logger().error(f"❌ Failed to load base position from file: {e}")
             raise SystemExit
 
-    def imu_callback(self, msg: Imu):
-        # Extract Yaw angle from Quaternion
-        q = msg.orientation
-        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
+    def heading_callback(self, msg: Float64):
+        # Heading from QMC5883L in degrees -> convert to radians [-pi, pi]
+        deg = msg.data
+        self.current_yaw = math.radians(deg)
+        self.current_yaw = math.atan2(math.sin(self.current_yaw), math.cos(self.current_yaw))
 
     def angle_error_rad(self, target, current):
         diff = target - current
@@ -116,6 +115,20 @@ class BaseEnterNode(Node):
         while diff < -math.pi:
             diff += 2 * math.pi
         return diff
+
+    def send_motor_cmd(self, v, w):
+        msg = String()
+        if v == 0.0 and w == 0.0:
+            msg.data = "stop"
+        elif v > 0:
+            msg.data = "f 70"
+        elif v < 0:
+            msg.data = "b 70"
+        elif w > 0:
+            msg.data = "l 70"
+        elif w < 0:
+            msg.data = "r 70"
+        self.cmd_pub.publish(msg)
 
     def control_loop(self):
         if self.state == 'DONE':
@@ -131,10 +144,9 @@ class BaseEnterNode(Node):
             self.current_x = t.transform.translation.x
             self.current_y = t.transform.translation.y
         except TransformException as e:
-            self.get_logger().warn(f'TF lookup failed: {e}. Waiting for transform...', throttle_duration_sec=3.0)
-            return
-
-        cmd = Twist()
+            self.get_logger().warn(f'TF lookup failed: {e}. Odometry disabled, skipping NAVIGATING...', throttle_duration_sec=3.0)
+            if self.state == 'NAVIGATING':
+                self.state = 'ALIGNING'
 
         if self.state == 'NAVIGATING':
             dx = self.target_x - self.current_x
@@ -146,7 +158,7 @@ class BaseEnterNode(Node):
             if distance <= self.arrival_radius:
                 self.get_logger().info(f"📍 Arrived at target coordinate! Distance: {distance:.2f}m. Aligning to entry yaw...")
                 self.state = 'ALIGNING'
-                self.cmd_pub.publish(Twist())  # Stop
+                self.send_motor_cmd(0.0, 0.0)  # Stop
                 return
 
             error = self.angle_error_rad(target_bearing, self.current_yaw)
@@ -157,14 +169,9 @@ class BaseEnterNode(Node):
 
             # Control strategy: Rotate in place if error is large, else move forward
             if abs(error) > 0.3:  # ~17 degrees
-                cmd.linear.x = 0.0
-                cmd.angular.z = self.turn_speed if error > 0 else -self.turn_speed
+                self.send_motor_cmd(0.0, self.turn_speed if error > 0 else -self.turn_speed)
             else:
-                cmd.linear.x = self.forward_speed
-                cmd.angular.z = 1.5 * error
-                cmd.angular.z = max(-self.turn_speed, min(self.turn_speed, cmd.angular.z))
-
-            self.cmd_pub.publish(cmd)
+                self.send_motor_cmd(self.forward_speed, 0.0)
 
         elif self.state == 'ALIGNING':
             error = self.angle_error_rad(self.target_yaw, self.current_yaw)
@@ -174,31 +181,19 @@ class BaseEnterNode(Node):
             )
 
             if abs(error) > self.heading_tolerance:
-                cmd.linear.x = 0.0
-                cmd.angular.z = self.turn_speed if error > 0 else -self.turn_speed
-                
-                # Scale speed down near target
-                if abs(error) < 0.2:
-                    cmd.angular.z = (error / 0.2) * self.turn_speed
-                    min_rot = 0.1
-                    if cmd.angular.z > 0 and cmd.angular.z < min_rot: cmd.angular.z = min_rot
-                    elif cmd.angular.z < 0 and cmd.angular.z > -min_rot: cmd.angular.z = -min_rot
-                
-                self.cmd_pub.publish(cmd)
+                self.send_motor_cmd(0.0, self.turn_speed if error > 0 else -self.turn_speed)
             else:
                 self.get_logger().info("✅ Alignment complete! Starting entry into the base station.")
                 self.state = 'ENTERING'
                 self.entering_start_time = self.get_clock().now()
-                self.cmd_pub.publish(Twist())  # Stop briefly before entry
+                self.send_motor_cmd(0.0, 0.0)  # Stop briefly before entry
 
         elif self.state == 'ENTERING':
             self.get_logger().info(
                 f"Entering base... Driving straight at {self.forward_speed:.2f} m/s",
                 throttle_duration_sec=1.0
             )
-            cmd.linear.x = self.forward_speed
-            cmd.angular.z = 0.0
-            self.cmd_pub.publish(cmd)
+            self.send_motor_cmd(self.forward_speed, 0.0)
 
     def scan_callback(self, msg: LaserScan):
         if self.state != 'ENTERING' or self.entering_start_time is None:
@@ -248,10 +243,7 @@ class BaseEnterNode(Node):
             raise SystemExit
 
     def stop_robot_completely(self):
-        cmd = Twist()
-        cmd.linear.x = 0.0
-        cmd.angular.z = 0.0
-        self.cmd_pub.publish(cmd)
+        self.send_motor_cmd(0.0, 0.0)
 
 
 def main(args=None):

@@ -34,7 +34,7 @@ gps_nav_test:
 base_exit_node:
   ros__parameters:
     forward_speed: 0.2               # Üsten çıkış sırasındaki düz sürüş hızı [m/s]
-    clear_threshold: 1.5             # Ön alanın engelden temiz kabul edilme kritik mesafesi [metre]
+    clear_threshold: 0.5             # Ön alanın engelden temiz kabul edilme mesafesi [0.5 metre]
     arc_degrees: 120.0               # Lidar tarama açısı [derece] (+/-120° = toplam 240° taranır)
 
 # ---------------------------------------------------------

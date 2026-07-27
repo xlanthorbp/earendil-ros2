@@ -9,8 +9,8 @@ import sys
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
-from sensor_msgs.msg import LaserScan, Imu
+from std_msgs.msg import String, Float64
+from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener, TransformException
 
 
@@ -33,9 +33,9 @@ class BaseExitNode(Node):
         self.base_saved = False
         
         # Publishers and Subscribers
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.imu_sub = self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
+        self.heading_sub = self.create_subscription(Float64, '/earendil/heading/deg', self.heading_callback, 10)
         
         # TF (To get X and Y position based on map/odom)
         self.tf_buffer = Buffer()
@@ -43,12 +43,12 @@ class BaseExitNode(Node):
         
         self.get_logger().info('Base Exit Node Started. Driving forward...')
         
-    def imu_callback(self, msg: Imu):
-        # Extract Yaw angle from Quaternion
-        q = msg.orientation
-        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
+    def heading_callback(self, msg: Float64):
+        # Heading from QMC5883L in degrees -> convert to radians [-pi, pi]
+        deg = msg.data
+        self.current_yaw = math.radians(deg)
+        # Normalize to [-pi, pi]
+        self.current_yaw = math.atan2(math.sin(self.current_yaw), math.cos(self.current_yaw))
         
     def scan_callback(self, msg: LaserScan):
         if self.state == 'DONE':
@@ -82,8 +82,9 @@ class BaseExitNode(Node):
                 self.get_logger().info(f'✅ FRONT AREA COMPLETELY CLEAR! (Min distance: {min_dist:.2f}m > {self.clear_threshold}m). Stopping motors...')
                 
                 # Stop
-                twist = Twist()
-                self.cmd_pub.publish(twist)
+                msg = String()
+                msg.data = "stop"
+                self.cmd_pub.publish(msg)
                 
                 self.state = 'SAVING'
                 self.save_position()
@@ -95,10 +96,9 @@ class BaseExitNode(Node):
                     f'[Current Compass Angle: {math.degrees(self.current_yaw)%360:.1f}°]',
                     throttle_duration_sec=1.0
                 )
-                twist = Twist()
-                twist.linear.x = self.forward_speed
-                twist.angular.z = 0.0
-                self.cmd_pub.publish(twist)
+                msg = String()
+                msg.data = "f 70"  # Target forward PWM
+                self.cmd_pub.publish(msg)
 
     def save_position(self):
         # 1. Get position (Try Odom via TF first, otherwise assume 0.0)

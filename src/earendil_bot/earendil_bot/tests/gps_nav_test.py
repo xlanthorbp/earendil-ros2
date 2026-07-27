@@ -15,8 +15,7 @@ Usage:
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import Float32
-from geometry_msgs.msg import Twist
+from std_msgs.msg import Float64, String
 import math
 import time
 from earendil_bot.gps.gps_math import bearing_between_gps_rad, haversine, angle_error_rad
@@ -55,7 +54,7 @@ class GpsNavTest(Node):
         self.get_logger().info(f"Target Waypoint: ({self.target_lat:.6f}, {self.target_lon:.6f})")
         self.get_logger().info(f"Arrival Radius: {self.arrival_radius}m")
         self.get_logger().info(f"Heading Tolerance: {heading_tol_deg:.1f}°")
-        self.get_logger().info(f"Waiting for GPS on /gps/fix and Magnetometer on /mag/heading ...")
+        self.get_logger().info(f"Waiting for GPS on /gps/fix and Magnetometer on /earendil/heading/deg ...")
 
         # State Variables
         self.current_lat = None
@@ -69,15 +68,15 @@ class GpsNavTest(Node):
         self.arrived = False      # Has the vehicle arrived at target?
 
         # Publisher & Subscriber
-        self.pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
-        self.create_subscription(Float32, '/mag/heading', self.mag_cb, 10)
+        self.pub = self.create_publisher(String, '/earendil/control/command', 10)
+        self.create_subscription(Float64, '/earendil/heading/deg', self.mag_cb, 10)
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_cb, 10)
 
         # Control loop 10 Hz
         self.timer = self.create_timer(0.1, self.control_loop)
 
-    def mag_cb(self, msg: Float32):
-        # /mag/heading publishes heading in degrees (0-360)
+    def mag_cb(self, msg: Float64):
+        # /earendil/heading/deg publishes heading in degrees (0-360)
         self.mag_heading = math.radians(msg.data)
         self.last_mag_time = time.time()
 
@@ -86,8 +85,24 @@ class GpsNavTest(Node):
         self.current_lon = msg.longitude
         self.last_gps_time = time.time()
 
+    def send_motor_cmd(self, v, w):
+        if self.dry_run:
+            v = 0.0
+            w = 0.0
+            
+        msg = String()
+        if abs(w) > 0.1:
+            pwm = 60 + int((abs(w) / self.max_angular_z) * 30)
+            msg.data = f"l {min(90, max(60, pwm))}" if w > 0 else f"r {min(90, max(60, pwm))}"
+        elif abs(v) > 0.05:
+            pwm = 60 + int((abs(v) / self.max_linear_x) * 30)
+            msg.data = f"f {min(90, max(60, pwm))}" if v > 0 else f"b {min(90, max(60, pwm))}"
+        else:
+            msg.data = "stop"
+            
+        self.pub.publish(msg)
+
     def control_loop(self):
-        cmd = Twist()
 
         if self.arrived:
             return
@@ -97,13 +112,13 @@ class GpsNavTest(Node):
             return
 
         if self.mag_heading is None or (time.time() - self.last_mag_time > 1.5):
-            self.get_logger().warn("Waiting for Magnetometer data (/mag/heading) or connection lost!", throttle_duration_sec=2.0)
-            self.stop_robot(cmd)
+            self.get_logger().warn("Waiting for Magnetometer data (/earendil/heading/deg) or connection lost!", throttle_duration_sec=2.0)
+            self.stop_robot()
             return
 
         if self.current_lat is None or (time.time() - self.last_gps_time > 2.0):
             self.get_logger().warn("Waiting for GPS data (/gps/fix) or connection lost!", throttle_duration_sec=2.0)
-            self.stop_robot(cmd)
+            self.stop_robot()
             return
 
         # Current Target Bearing and Distance Calculation
@@ -114,7 +129,7 @@ class GpsNavTest(Node):
         if distance <= self.arrival_radius:
             self.arrived = True
             self.get_logger().info(f"TARGET REACHED! Distance to target: {distance:.2f}m")
-            self.stop_robot(cmd)
+            self.stop_robot()
             return
 
         # Heading Error (Radians)
@@ -127,6 +142,9 @@ class GpsNavTest(Node):
             f"Error: {math.degrees(error):.1f}° | "
             f"State: {'DRIVING' if self.aligned else 'ROTATING'}", throttle_duration_sec=1.0)
 
+        v = 0.0
+        w = 0.0
+
         # PHASE 1: Rotate to Target (Rotate phase)
         if not self.aligned:
             if abs(error) > self.heading_tol:
@@ -137,8 +155,8 @@ class GpsNavTest(Node):
                 if angular_vel > self.max_angular_z: angular_vel = self.max_angular_z
                 elif angular_vel < -self.max_angular_z: angular_vel = -self.max_angular_z
                 
-                cmd.angular.z = angular_vel
-                cmd.linear.x = 0.0
+                w = angular_vel
+                v = 0.0
             else:
                 self.aligned = True
                 self.get_logger().info("Angle aligned! Switching to driving phase.")
@@ -149,30 +167,24 @@ class GpsNavTest(Node):
             if abs(error) > self.heading_tol * 3:
                 self.aligned = False
                 self.get_logger().info("Alignment lost! Re-aligning...")
-                cmd.linear.x = 0.0
-                cmd.angular.z = 0.0  # Will be calculated in the next loop
+                v = 0.0
+                w = 0.0  # Will be calculated in the next loop
             else:
                 # Make small corrections while driving forward
-                cmd.linear.x = self.max_linear_x
-                cmd.angular.z = self.kp_lane * error  # Lane keeping Kp
+                v = self.max_linear_x
+                w = self.kp_lane * error  # Lane keeping Kp
                 
                 # Z limit (If needed)
-                if cmd.angular.z > self.max_angular_z: cmd.angular.z = self.max_angular_z
-                elif cmd.angular.z < -self.max_angular_z: cmd.angular.z = -self.max_angular_z
+                if w > self.max_angular_z: w = self.max_angular_z
+                elif w < -self.max_angular_z: w = -self.max_angular_z
 
         if self.invert_turn:
-            cmd.angular.z = -cmd.angular.z
+            w = -w
 
-        if self.dry_run:
-            cmd.angular.z = 0.0
-            cmd.linear.x = 0.0
+        self.send_motor_cmd(v, w)
 
-        self.pub.publish(cmd)
-
-    def stop_robot(self, cmd: Twist):
-        cmd.linear.x = 0.0
-        cmd.angular.z = 0.0
-        self.pub.publish(cmd)
+    def stop_robot(self):
+        self.send_motor_cmd(0.0, 0.0)
 
 def main(args=None):
     rclpy.init(args=args)

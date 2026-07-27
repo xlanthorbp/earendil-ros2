@@ -4,21 +4,29 @@
 #  Sadece earendil_bot/scripts/ klasöründekiler hariçtir; oradaki kodlar örnek/test kodlarıdır.)
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import Twist, Point
-from std_msgs.msg import Bool
-from sensor_msgs.msg import Range
+from sensor_msgs.msg import LaserScan, Range
+from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Float64
 import math
+
+class DummyTwist:
+    class Linear:
+        x = 0.0
+    class Angular:
+        z = 0.0
+    def __init__(self):
+        self.linear = self.Linear()
+        self.angular = self.Angular()
 
 class Test5Node(Node):
     def __init__(self):
         super().__init__('test5')
         
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.cmd_pub = self.create_publisher(String, '/earendil/control/command', 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.ir_sub = self.create_subscription(Range, '/ir_top', self.ir_callback, 10)
-        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.heading_sub = self.create_subscription(Float64, '/earendil/heading/deg', self.heading_callback, 10)
         
         self.aruco_midpoint_sub = self.create_subscription(Point, '/aruco_midpoint', self.aruco_midpoint_callback, 10)
         self.aruco_visible_sub = self.create_subscription(Bool, '/aruco_visible', self.aruco_visible_callback, 10)
@@ -171,8 +179,19 @@ class Test5Node(Node):
     def stop_motors_safely(self):
         """Sends 0 velocity to motors when the node shuts down for any reason."""
         self.get_logger().info('Shutdown signal received: Stopping motors for safety...')
-        stop_twist = Twist()
-        self.cmd_pub.publish(stop_twist)
+        self.send_motor_cmd(0.0, 0.0)
+
+    def send_motor_cmd(self, v, w):
+        msg = String()
+        if abs(w) > 0.05:
+            pwm = 60 + int((abs(w) / 0.5) * 30)
+            msg.data = f"l {min(90, max(60, pwm))}" if w > 0 else f"r {min(90, max(60, pwm))}"
+        elif abs(v) > 0.05:
+            pwm = 60 + int((abs(v) / 0.3) * 30)
+            msg.data = f"f {min(90, max(60, pwm))}" if v > 0 else f"b {min(90, max(60, pwm))}"
+        else:
+            msg.data = "stop"
+        self.cmd_pub.publish(msg)
 
     def get_avg_distance(self, msg, target_angle_deg):
         target_rad = math.radians(target_angle_deg)
@@ -192,26 +211,14 @@ class Test5Node(Node):
             return 6.0
         return sum(valid_ranges) / len(valid_ranges)
 
-    def odom_callback(self, msg):
-        self.current_speed = msg.twist.twist.linear.x
-        if self.tunnel_timer_started and not self.tunnel_timer_completed:
-            self.speeds_during_tunnel.append(self.current_speed)
-
-        # Update pose
-        self.current_x = msg.pose.pose.position.x
-        self.current_y = msg.pose.pose.position.y
-        
-        # Get yaw from quaternion
-        _, _, yaw = self.euler_from_quaternion(msg.pose.pose.orientation)
-        
-        # Track accumulated yaw when searching
+    def heading_callback(self, msg):
+        yaw = math.radians(msg.data)
         if self.odom_received:
             if self.state == 'SEARCHING_ENTRANCE':
                 diff = self.normalize_angle(yaw - self.current_yaw)
                 self.accumulated_yaw += diff
         else:
             self.odom_received = True
-
         self.current_yaw = yaw
 
     def ir_callback(self, msg):
@@ -277,13 +284,13 @@ class Test5Node(Node):
             self.aruco_right_visible = True
 
         front_dist = self.get_avg_distance(msg, 0.0)
-        twist = Twist()
+        twist = DummyTwist()
         
         if front_dist < 0.20 and self.state not in ['COMPLETED', 'BACKING_UP_FOR_SEARCH']:
             self.get_logger().warn(f'OBSTACLE AHEAD ({front_dist:.2f}m)! Stopping.', throttle_duration_sec=1.0)
             twist.linear.x = 0.0
             twist.angular.z = 0.0
-            self.cmd_pub.publish(twist)
+            self.send_motor_cmd(twist.linear.x, twist.angular.z)
             return
             
         left_dist = self.get_avg_distance(msg, 90.0)
@@ -291,34 +298,33 @@ class Test5Node(Node):
         
         if self.state == 'SEARCHING_ENTRANCE':
             if self.aruco_left_visible and self.aruco_right_visible:
-                self.get_logger().info('Both entrance ArUco tags detected! Stopping to calculate alignment.')
-                twist.linear.x = 0.0
-                twist.angular.z = 0.0
-                self.state = 'CALCULATING_ALIGNMENT'
+                self.get_logger().info('Both entrance ArUco tags detected! Odometry disabled, skipping alignment and approaching directly.')
+                v = 0.0
+                w = 0.0
+                self.state = 'APPROACHING_ENTRANCE'
             else:
                 # If we've completed a 360-degree rotation without finding both tags
                 if abs(self.accumulated_yaw) >= 2.0 * math.pi - 0.05:
-                    self.get_logger().warn('Completed 360-degree rotation but did not detect both ArUcos. Backing up 2 meters.')
-                    twist.linear.x = 0.0
-                    twist.angular.z = 0.0
-                    self.start_x = self.current_x
-                    self.start_y = self.current_y
+                    self.get_logger().warn('Completed 360-degree rotation but did not detect both ArUcos. Backing up for 5 seconds.')
+                    v = 0.0
+                    w = 0.0
+                    self.backup_start_time = self.get_clock().now()
                     self.state = 'BACKING_UP_FOR_SEARCH'
                 else:
                     self.get_logger().info(f'Searching for both entrance ArUcos (Accumulated turn: {math.degrees(self.accumulated_yaw):.1f}deg)...', throttle_duration_sec=2.0)
-                    twist.angular.z = -0.4 # Turn right slowly
+                    w = -0.4 # Turn right slowly
                     
         elif self.state == 'BACKING_UP_FOR_SEARCH':
-            dist_backed = math.hypot(self.current_x - self.start_x, self.current_y - self.start_y)
-            if dist_backed >= self.backup_distance:
-                self.get_logger().info('Backed up 2 meters. Resuming 360-degree search.')
-                twist.linear.x = 0.0
+            elapsed = (self.get_clock().now() - self.backup_start_time).nanoseconds / 1e9
+            if elapsed >= 5.0:
+                self.get_logger().info('Backed up 5 seconds. Resuming 360-degree search.')
+                v = 0.0
                 self.accumulated_yaw = 0.0
                 self.state = 'SEARCHING_ENTRANCE'
             else:
-                self.get_logger().info(f'Backing up... Distance: {dist_backed:.2f}m / {self.backup_distance:.1f}m', throttle_duration_sec=1.0)
-                twist.linear.x = -self.forward_speed_approach
-                twist.angular.z = 0.0
+                self.get_logger().info(f'Backing up... {elapsed:.1f}s / 5.0s', throttle_duration_sec=1.0)
+                v = -self.forward_speed_approach
+                w = 0.0
                 
         elif self.state == 'CALCULATING_ALIGNMENT':
             # Stop the robot first
@@ -548,7 +554,7 @@ class Test5Node(Node):
             throttle_duration_sec=0.5
         )
             
-        self.cmd_pub.publish(twist)
+        self.send_motor_cmd(twist.linear.x, twist.angular.z)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -558,8 +564,9 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        stop_twist = Twist()
-        node.cmd_pub.publish(stop_twist)
+        msg = String()
+        msg.data = "stop"
+        node.cmd_pub.publish(msg)
         node.destroy_node()
         rclpy.shutdown()
 

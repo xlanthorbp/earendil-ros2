@@ -1,6 +1,7 @@
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -29,13 +30,11 @@ def generate_launch_description():
             description='Target longitude for the navigation test (0.0 to prompt in terminal)'
         ),
 
-        # 1. Start Motor Control (Hardware Bridge Node)
-        Node(
-            package='earendil_bot',
-            executable='hardware_bridge',
-            name='hardware_bridge',
-            output='screen',
-            parameters=[hardware_params]
+        # 1. Start H7 Bridge / Sensors
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('earendil_h7_bridge'), 'launch', 'h7_sensors.launch.py')
+            )
         ),
 
         # 2. Start Rover RTK GPS Node (test mode)

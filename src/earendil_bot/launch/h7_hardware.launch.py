@@ -6,17 +6,13 @@ from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    # Earendil bot package path
     earendil_share_dir = get_package_share_directory('earendil_bot')
+    h7_bridge_share_dir = get_package_share_directory('earendil_h7_bridge')
     
-    # Lidar package path
-    ldlidar_share_dir = get_package_share_directory('ldlidar_stl_ros2')
-
-    # Parameters
     hardware_params = os.path.join(earendil_share_dir, 'config', 'hardware_params.yaml')
 
     return LaunchDescription([
-        # 1. Start Lidar (Directly defined so it can read hardware_params.yaml)
+        # 1. Start Lidar
         Node(
             package='ldlidar_stl_ros2',
             executable='ldlidar_stl_ros2_node',
@@ -42,16 +38,14 @@ def generate_launch_description():
             arguments=['0','0','0.18','0','0','0','base_link','base_laser']
         ),
         
-        # (IR Bridge has been merged into hardware_bridge)
-        
-        # 3. Motor Control and H7 Sensors
+        # 3. H7 Sensors and Bridge
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(get_package_share_directory('earendil_h7_bridge'), 'launch', 'h7_sensors.launch.py')
+                os.path.join(h7_bridge_share_dir, 'launch', 'h7_sensors.launch.py')
             )
         ),
 
-        # 5. Aruco Ethernet Receiver Node
+        # 4. Aruco Ethernet Receiver Node
         Node(
             package='earendil_bot',
             executable='aruco_receiver',

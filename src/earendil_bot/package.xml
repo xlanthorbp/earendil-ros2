@@ -14,8 +14,6 @@
   <depend>nav_msgs</depend>
   <depend>tf2_ros</depend>
 
-  <exec_depend>twist_mux</exec_depend>
-
   <!-- For simple_motor_bridge.py (import serial) -->
   <exec_depend>python3-serial</exec_depend> 
 

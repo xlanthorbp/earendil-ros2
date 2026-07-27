@@ -23,11 +23,15 @@ class RockReceiverNode(Node):
         self.declare_parameter('port_recv', 5007)              # Pi 5 receives data here
         self.declare_parameter('port_send', 5008)              # Pi 5 sends commands here
         self.declare_parameter('timeout', 1.5)                 # Network timeout in seconds
-        
+        self.declare_parameter('detection_confidence_frames', 3)
+        self.declare_parameter('max_valid_detection_dist', 8.0)
+
         self.jetson_ip = self.get_parameter('jetson_ip').value
         self.port_recv = self.get_parameter('port_recv').value
         self.port_send = self.get_parameter('port_send').value
         self.timeout = self.get_parameter('timeout').value
+        self.detection_confidence_frames = int(self.get_parameter('detection_confidence_frames').value)
+        self.max_valid_detection_dist = float(self.get_parameter('max_valid_detection_dist').value)
         
         # Publishers
         self.point_pub = self.create_publisher(Point, '/rock_point', 10)
@@ -99,8 +103,12 @@ class RockReceiverNode(Node):
                 # Extract values from JSON
                 visible = parsed_data.get("visible", False)
                 angle = parsed_data.get("angle", 0.0)
-                distance = parsed_data.get("distance", 0.0)
+                distance = float(parsed_data.get("distance", 0.0))
                 x_offset = parsed_data.get("x_offset", 0.0)  # Normalized horizontal offset
+                
+                # Filter by max valid detection distance
+                if distance > self.max_valid_detection_dist:
+                    visible = False
                 
                 # Update watchdog time
                 self.last_packet_time = time.time()

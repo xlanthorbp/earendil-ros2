@@ -42,6 +42,9 @@ setup(
             'tunnel_test5 = earendil_bot.tests.tunnel_test5:main',
             'aruco_receiver = earendil_bot.tests.aruco_receiver:main',
             'rock_receiver = earendil_bot.tests.rock_receiver:main',
+            'peak_finder = earendil_bot.tests.peak_finder:main',
+            'rscp_bridge_node = earendil_bot.rscp.rscp_bridge_node:main',
+            'mission_manager_node = earendil_bot.rscp.mission_manager_node:main',
         ],
     },
 )

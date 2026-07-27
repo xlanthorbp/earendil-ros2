@@ -13,8 +13,7 @@ Usage:
 """
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32
-from geometry_msgs.msg import Twist
+from std_msgs.msg import Float64, String
 import math
 import time
 from earendil_bot.gps.gps_math import angle_error_rad, normalize_heading_deg
@@ -46,32 +45,44 @@ class HeadingTest(Node):
 
         self.get_logger().info(f"Target Heading Set To: {target_heading_normalized:.1f}°")
         self.get_logger().info(f"Tolerance: {heading_tol_deg:.1f}°")
-        self.get_logger().info("Waiting for Magnetometer data on /mag/heading ...")
+        self.get_logger().info(f"Beklenen /earendil/heading/deg yayını için hazırız...")
 
         # State
         self.mag_heading = None
         self.last_mag_time = 0.0
 
         # Publisher & Subscriber
-        self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
-        self.create_subscription(Float32, '/mag/heading', self.mag_cb, 10)
+        self.pub = self.create_publisher(String, '/earendil/control/command', 10)
+        self.create_subscription(Float64, '/earendil/heading/deg', self.mag_cb, 10)
 
         # Control loop 10 Hz
         self.timer = self.create_timer(0.1, self.control_loop)
 
-    def mag_cb(self, msg: Float32):
-        # /mag/heading publishes heading in degrees (0-360)
+    def mag_cb(self, msg: Float64):
+        # /earendil/heading/deg yayını derece cinsindendir.
         self.mag_heading = math.radians(msg.data)
         self.last_mag_time = time.time()
 
-    def control_loop(self):
-        cmd = Twist()
+    def send_motor_cmd(self, v, w):
+        if self.dry_run:
+            v = 0.0
+            w = 0.0
+            
+        msg = String()
+        if v == 0.0 and w == 0.0:
+            msg.data = "stop"
+        elif w > 0:
+            pwm = 60 + int((abs(w) / self.turn_speed) * 30)
+            msg.data = f"l {min(90, max(60, pwm))}"
+        elif w < 0:
+            pwm = 60 + int((abs(w) / self.turn_speed) * 30)
+            msg.data = f"r {min(90, max(60, pwm))}"
+        self.pub.publish(msg)
 
-        if self.mag_heading is None or (time.time() - self.last_mag_time > 1.0):
-            self.get_logger().warn("Magnetometer Watchdog triggered! Sensor lost or waiting.", throttle_duration_sec=3.0)
-            cmd.linear.x = 0.0
-            cmd.angular.z = 0.0
-            self.pub.publish(cmd)
+    def control_loop(self):
+        if self.mag_heading is None or (time.time() - self.last_mag_time > 1.5):
+            self.get_logger().warn("Magnetometer data (/earendil/heading/deg) bekleniyor veya bağlantı koptu!", throttle_duration_sec=2.0)
+            self.send_motor_cmd(0.0, 0.0)
             return
 
         # Heading error
@@ -84,25 +95,20 @@ class HeadingTest(Node):
             throttle_duration_sec=0.5
         )
 
+        angular_vel = 0.0
         if abs(error) > self.heading_tol:
             # P-Controller logic
             angular_vel = self.kp_angular * error
             if angular_vel > self.turn_speed: angular_vel = self.turn_speed
             elif angular_vel < -self.turn_speed: angular_vel = -self.turn_speed
-            cmd.angular.z = angular_vel
         else:
             self.get_logger().info("ALIGNED WITH TARGET HEADING!", throttle_duration_sec=1.0)
-            cmd.angular.z = 0.0
+            angular_vel = 0.0
 
         if self.invert_turn:
-            cmd.angular.z = -cmd.angular.z
+            angular_vel = -angular_vel
 
-        if self.dry_run:
-            cmd.angular.z = 0.0
-            cmd.linear.x = 0.0
-
-        cmd.linear.x = 0.0
-        self.pub.publish(cmd)
+        self.send_motor_cmd(0.0, angular_vel)
 
 
 def main(args=None):
@@ -114,10 +120,9 @@ def main(args=None):
         pass
     finally:
         # Publish stop command
-        cmd = Twist()
-        cmd.linear.x = 0.0
-        cmd.angular.z = 0.0
-        node.pub.publish(cmd)
+        msg = String()
+        msg.data = "stop"
+        node.pub.publish(msg)
 
         node.destroy_node()
         if rclpy.ok():
