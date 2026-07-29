@@ -1,0 +1,189 @@
+# hardware_params.yaml
+# Earendil Bot Donanım ve Sensör Konfigürasyonları
+
+# ---------------------------------------------------------
+# RSCP Hakem Seri Haberleşme Köprü Düğümü (rscp_bridge_node)
+# ---------------------------------------------------------
+rscp_bridge_node:
+  ros__parameters:
+    port: "/dev/ttyUSBx"          # Hakem RSC-CM modülünün bağlı olduğu seri port (düz ttyUSB/ttyACM: /dev/ttyUSB2)
+    baudrate: 115200              # RSCP RS-232 baud hızı
+    status_rate_hz: 1.0           # Periyodik durum telemetrisi yayını (maks 1.0 Hz)
+    battery_default_voltage: 12.6 # Telemetri varsayılan batarya voltajı [Volt]
+    battery_default_current: 1.5  # Telemetri varsayılan batarya akımı [Amper]
+    battery_default_soc: 0.9      # Telemetri varsayılan batarya şarj yüzdesi (0.0 - 1.0)
+    ack_delay_s: 0.05             # Hakeme ACK yanıt iletim öncesi emniyet beklemesi [saniye]
+
+# ---------------------------------------------------------
+# STM32H7 Donanım Köprüsü ve Sürücü Ayarları
+# ---------------------------------------------------------
+h7_serial_node:
+  ros__parameters:
+    transport_type: "serial"        # Haberleşme modu: "serial" veya "tcp"
+    serial_device: "/dev/ttyACM0"   # STM32H7 kartının bağlı olduğu seri port (Seri modda)
+    baud_rate: 115200               # Seri haberleşme hızı
+    tcp_host: "127.0.0.1"           # TCP Bridge IP adresi (TCP modunda)
+    tcp_port: 5000                  # TCP Bridge Port adresi (TCP modunda)
+    heartbeat_enabled: true         # Watchdog canlı tutma sinyali (hb)
+    heartbeat_period_s: 0.5         # Heartbeat periyodu [saniye]
+
+/earendil/h7_serial_node:
+  ros__parameters:
+    transport_type: "serial"
+    serial_device: "/dev/ttyACM0"
+    baud_rate: 115200
+    tcp_host: "127.0.0.1"
+    tcp_port: 5000
+    heartbeat_enabled: true
+    heartbeat_period_s: 0.5
+
+h7_command_node:
+  ros__parameters:
+    auto_recover_enabled: true      # Otomatik mod kurtarma aktif
+    recovery_delay_s: 3.0           # Bağlantı koptuktan sonra moda dönüş beklemesi
+    mode_retry_period_s: 1.0
+
+/earendil/h7_command_node:
+  ros__parameters:
+    auto_recover_enabled: true
+    recovery_delay_s: 3.0
+    mode_retry_period_s: 1.0
+
+h7_kinematics_node:
+  ros__parameters:
+    wheel_radius: 0.033             # Tekerlek yarıçapı [metre]
+    wheel_separation: 0.160         # Aks mesafesi / tekerlek arası genişlik [metre]
+    max_rpm: 200                    # STM32H723 firmware varsayılan maksimum tekerlek RPM'i
+    cmd_vel_topic: "/cmd_vel"       # Abone olunacak Twist hız konusu
+    output_command_topic: "h7/command" # H7'ye iletilecek komut konusu
+    deadband_linear: 0.01           # Lineer hız ölü bölgesi (m/s)
+    deadband_angular: 0.05          # Açısal hız ölü bölgesi (rad/s)
+
+/earendil/h7_kinematics_node:
+  ros__parameters:
+    wheel_radius: 0.033
+    wheel_separation: 0.160
+    max_rpm: 200
+    cmd_vel_topic: "/cmd_vel"
+    output_command_topic: "h7/command"
+    deadband_linear: 0.01
+    deadband_angular: 0.05
+
+heading_node:
+  ros__parameters:
+    calibration_file: "~/.config/earendil/mag_calibration.json"
+    frame_id: "base_footprint"
+    heading_offset_deg: 0.0
+    filter_alpha: 0.20
+
+/earendil/heading_node:
+  ros__parameters:
+    calibration_file: "~/.config/earendil/mag_calibration.json"
+    frame_id: "base_footprint"
+    heading_offset_deg: 0.0
+    filter_alpha: 0.20
+
+imu_node:
+  ros__parameters:
+    frame_id: "base_footprint"
+    pair_max_age_ms: 500
+
+/earendil/imu_node:
+  ros__parameters:
+    frame_id: "base_footprint"
+    pair_max_age_ms: 500
+
+magnetometer_node:
+  ros__parameters:
+    frame_id: "base_footprint"
+
+/earendil/magnetometer_node:
+  ros__parameters:
+    frame_id: "base_footprint"
+
+wheel_telemetry_node:
+  ros__parameters:
+    frame_id: "base_footprint"
+    stale_timeout_ms: 1000
+    joint_names:
+      - "front_left_wheel_joint"
+      - "front_right_wheel_joint"
+      - "rear_left_wheel_joint"
+      - "rear_right_wheel_joint"
+
+/earendil/wheel_telemetry_node:
+  ros__parameters:
+    frame_id: "base_footprint"
+    stale_timeout_ms: 1000
+    joint_names:
+      - "front_left_wheel_joint"
+      - "front_right_wheel_joint"
+      - "rear_left_wheel_joint"
+      - "rear_right_wheel_joint"
+
+# ---------------------------------------------------------
+# Ana Görev Yöneticisi Düğümü (mission_manager_node)
+# ---------------------------------------------------------
+mission_manager_node:
+  ros__parameters:
+    default_search_radius: 5.0    # Zirve / Bazalt arama varsayılan yarıçapı [metre]
+    basalt_rock_arrival_distance: 0.5 # Bazalt kayaya varış kabul mesafesi [0.5 metre]
+    auto_stop_on_disarm: true     # DISARM sinyalinde motorları otomatik durdurma
+    task_finished_delay_s: 0.5    # TaskFinished bildirimi öncesi emniyet beklemesi [saniye]
+
+# ---------------------------------------------------------
+# RTK GPS Modülü Düğümü (roverRTK)
+# ---------------------------------------------------------
+roverRTK:
+  ros__parameters:
+    gps_port: "/dev/ttyUSBx"      # Rover LC29H GPS alıcısının bağlı olduğu USB seri port
+    radio_port: "/dev/ttyUSBx"    # USB-TTL RF Telemetri radyosunun bağlı olduğu seri port
+    gps_baud: 460800              # Rover GPS seri port baud hızı
+    radio_baud: 115200            # RF Telemetri seri port baud hızı (115200 baud)
+    configure_rover: true         # Başlangıçta Rover GPS modülünü otomatik konfigüre et
+    min_pwm: 60                   # Otonom sürüş minimum PWM sınırı
+    max_pwm: 90                   # Otonom sürüş maksimum PWM sınırı
+    target_pwm: 80                # Hedef otonom seyir PWM hızı
+    cmd_vel_topic: "/cmd_vel"     # Motor hareket komutlarının yayınlanacağı topic
+    target_lat: 0.0               # Başlangıç hedef GPS enlemi
+    target_lon: 0.0               # Başlangıç hedef GPS boylamı
+    enable_test_flow: false       # Otonom sürüş test akışını çalıştırma bayrağı (varsayılan kapalı)
+    map_link_print_interval: 3.0  # Harita linklerinin terminale yazdırılma sıklığı (saniye)
+    map_link_topic: "/gps/map_link" # Google Harita linkinin yayınlanacağı ROS konusu (topic)
+
+# ---------------------------------------------------------
+# 2D Lidar Düğümü (STL27L)
+# ---------------------------------------------------------
+STL27L:
+  ros__parameters:
+    port_name: "/dev/ttyUSBx"     # Lidar sensörünün bağlı olduğu seri port aygıtı
+    port_baudrate: 921600         # Lidar veri aktarım baud hızı
+
+# ---------------------------------------------------------
+# ArUco Etiket Alıcısı - Ethernet / Jetson (aruco_receiver)
+# ---------------------------------------------------------
+aruco_receiver:
+  ros__parameters:
+    jetson_ip: "192.168.1.101"    # Görüntü işleyen Jetson kartının IP adresi
+    port_recv: 5005               # ArUco tespit verisinin alınacağı UDP portu
+    port_send: 5006               # Jetson'a komut/tetik gönderilecek UDP portu
+    timeout: 1.5                  # Paket gelmezse bağlantı kopuk ilan etme süresi [saniye]
+    detection_confidence_frames: 3 # Doğrulama için min ardışık tespit karesi
+    max_valid_detection_dist: 8.0 # Maksimum geçerli algılama mesafesi [metre]
+    initial_stage: 1              # Başlangıç görevi/aşaması
+    active_stages: [1, 3, 4]      # ArUco tespiti aktif olduğu aşamalar (Stage 2 Krater hariç)
+
+# ---------------------------------------------------------
+# Taş Tespit Alıcısı - Ethernet / Jetson (rock_receiver)
+# ---------------------------------------------------------
+rock_receiver:
+  ros__parameters:
+    jetson_ip: "192.168.1.101"    # Taş tespiti yapan Jetson kartının IP adresi
+    port_recv: 5007               # Taş verilerinin alınacağı UDP portu
+    port_send: 5008               # Jetson'a yanıt/tetik gönderilecek UDP portu
+    timeout: 1.5                  # Taş verisi gelmezse zaman aşımı süresi [saniye]
+    detection_confidence_frames: 3 # Doğrulama için min ardışık tespit karesi
+    max_valid_detection_dist: 8.0 # Maksimum geçerli algılama mesafesi [metre]
+    initial_stage: 1              # Başlangıç görevi/aşaması (Stage 2 öncesi beklemede)
+    active_stage: 2               # Taş tespitinin aktif çalıştığı aşama (Stage 2: Krater)
+    auto_shutdown_after_stage: true # Stage > 2 (Tünel vs.) olduğunda nodu otomatik shutdown et
